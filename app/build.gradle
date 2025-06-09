@@ -1,16 +1,17 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
 }
 
 android {
     namespace 'io.horizontalsystems.tronkit.sample'
-    compileSdk 33
+    compileSdk 34
 
     defaultConfig {
         applicationId "io.horizontalsystems.tronkit"
         minSdk 27
-        targetSdk 33
+        targetSdk 34
         versionCode 1
         versionName "1.0"
 

@@ -10,11 +10,11 @@ import io.horizontalsystems.tronkit.network.Network
 import io.horizontalsystems.tronkit.toRawHexString
 import java.math.BigInteger
 
-class Signer(
+open class Signer(
     private val privateKey: BigInteger
 ) {
 
-    fun sign(createdTransaction: CreatedTransaction): ByteArray {
+    open fun sign(createdTransaction: CreatedTransaction): ByteArray {
         val rawTransactionHash = io.horizontalsystems.hdwalletkit.Utils.sha256(createdTransaction.raw_data_hex.hexStringToByteArray())
 
         return Utils.ellipticSign(rawTransactionHash, privateKey)
