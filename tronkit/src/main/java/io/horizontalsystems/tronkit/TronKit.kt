@@ -3,7 +3,6 @@ package io.horizontalsystems.tronkit
 import android.app.Application
 import android.content.Context
 import com.google.gson.Gson
-import io.horizontalsystems.hdwalletkit.Mnemonic
 import io.horizontalsystems.tronkit.account.AccountInfoManager
 import io.horizontalsystems.tronkit.contracts.ContractMethodHelper
 import io.horizontalsystems.tronkit.contracts.trc20.TransferMethod
@@ -19,6 +18,7 @@ import io.horizontalsystems.tronkit.models.TransferContract
 import io.horizontalsystems.tronkit.models.TriggerSmartContract
 import io.horizontalsystems.tronkit.network.ApiKeyProvider
 import io.horizontalsystems.tronkit.network.ConnectionManager
+import io.horizontalsystems.tronkit.network.CreatedTransaction
 import io.horizontalsystems.tronkit.network.Network
 import io.horizontalsystems.tronkit.network.TronGridService
 import io.horizontalsystems.tronkit.sync.ChainParameterManager
@@ -48,7 +48,8 @@ class TronKit(
     private val transactionManager: TransactionManager,
     private val transactionSender: TransactionSender,
     private val feeProvider: FeeProvider,
-    private val chainParameterManager: ChainParameterManager
+    private val chainParameterManager: ChainParameterManager,
+    private val allowanceManager: AllowanceManager
 ) {
     private var started = false
     private var scope: CoroutineScope? = null
@@ -107,20 +108,38 @@ class TronKit(
         return accountInfoManager.getTrc20BalanceFlow(contractAddress)
     }
 
+    suspend fun getTrc20Allowance(contract: Address, spender: Address): BigInteger {
+        return allowanceManager.allowance(contract, spender)
+    }
+
     fun getFullTransactionsFlow(tags: List<List<String>>): Flow<List<FullTransaction>> {
         return transactionManager.getFullTransactionsFlow(tags)
     }
 
-    suspend fun getFullTransactions(tags: List<List<String>>, fromHash: ByteArray? = null, limit: Int? = null): List<FullTransaction> {
-        return transactionManager.getFullTransactions(tags, fromHash, limit)
+    suspend fun getFullTransactionsBefore(tags: List<List<String>>, fromHash: ByteArray? = null, limit: Int? = null): List<FullTransaction> {
+        return transactionManager.getFullTransactionsBefore(tags, fromHash, limit)
     }
 
     suspend fun getFullTransactions(hashes: List<ByteArray>): List<FullTransaction> {
         return transactionManager.getFullTransactions(hashes)
     }
 
+    suspend fun getFullTransactionsAfter(tags: List<List<String>>, fromHash: ByteArray? = null, limit: Int? = null): List<FullTransaction> {
+        return transactionManager.getFullTransactionsAfter(tags, fromHash, limit)
+    }
+
+    suspend fun getPendingTransactions(tags: List<List<String>>): List<FullTransaction> {
+        return transactionManager.getPendingTransactions(tags)
+    }
+
     suspend fun estimateFee(contract: Contract): List<Fee> {
         return feeProvider.estimateFee(contract)
+    }
+
+    suspend fun estimateFee(createdTransaction: CreatedTransaction): List<Fee> {
+        // estimates fee for the first contract
+        val contract = Contract.from(createdTransaction.raw_data.contract.firstOrNull())
+        return contract?.let { feeProvider.estimateFee(it) } ?: throw java.lang.IllegalStateException("No contract!")
     }
 
     suspend fun isAccountActive(address: Address): Boolean {
@@ -156,8 +175,16 @@ class TronKit(
         )
     }
 
+    fun approveTrc20TriggerSmartContract(contract: Address, spender: Address, amount: BigInteger): TriggerSmartContract {
+        return allowanceManager.approveTrc20TriggerSmartContract(contract, spender, amount)
+    }
+
     suspend fun send(contract: Contract, signer: Signer, feeLimit: Long? = null): String {
         val createdTransaction = transactionSender.createTransaction(contract, feeLimit)
+        return send(createdTransaction, signer)
+    }
+
+    suspend fun send(createdTransaction: CreatedTransaction, signer: Signer): String {
         val response = transactionSender.broadcastTransaction(createdTransaction, signer)
 
         check(response.result) {
@@ -244,10 +271,13 @@ class TronKit(
             tronGridApiKeys: List<String>,
             walletId: String
         ): TronKit {
-            val privateKey = Signer.privateKey(seed, network)
-            val address = Signer.address(privateKey, network)
-
+            val address = getAddress(seed, network)
             return getInstance(application, address, network, tronGridApiKeys, walletId)
+        }
+
+        fun getAddress(seed: ByteArray, network: Network): Address {
+            val privateKey = Signer.privateKey(seed, network)
+            return Signer.address(privateKey, network)
         }
 
         fun getInstance(
@@ -271,8 +301,19 @@ class TronKit(
             val transactionSender = TransactionSender(tronGridService)
             val chainParameterManager = ChainParameterManager(tronGridService, storage)
             val feeProvider = FeeProvider(tronGridService, chainParameterManager)
+            val allowanceManager = AllowanceManager(address, tronGridService)
 
-            return TronKit(address, network, syncer, accountInfoManager, transactionManager, transactionSender, feeProvider, chainParameterManager)
+            return TronKit(
+                address,
+                network,
+                syncer,
+                accountInfoManager,
+                transactionManager,
+                transactionSender,
+                feeProvider,
+                chainParameterManager,
+                allowanceManager
+            )
         }
     }
 
