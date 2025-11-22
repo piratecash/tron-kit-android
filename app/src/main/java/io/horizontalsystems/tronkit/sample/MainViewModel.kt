@@ -255,8 +255,8 @@ class MainViewModelFactory : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         val network = Network.Mainnet
-        val apiKeys = listOf<String>()
-        val words = " ".split(" ")
+        val apiKeys = listOf(BuildConfig.TRONGRID_API_KEY)
+        val words = BuildConfig.WORDS.split(" ")
         val seed = Mnemonic().toSeed(words)
         val kit = TronKit.getInstance(App.instance, seed, network, apiKeys, "tron-demo-app")
         val signer = Signer.getInstance(seed, network)

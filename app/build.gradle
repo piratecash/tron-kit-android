@@ -4,6 +4,9 @@ plugins {
     id 'org.jetbrains.kotlin.plugin.compose'
 }
 
+def localProperties = new Properties()
+localProperties.load(new FileInputStream(rootProject.file("local.properties")))
+
 android {
     namespace 'io.horizontalsystems.tronkit.sample'
     compileSdk 34
@@ -15,6 +18,8 @@ android {
         versionCode 1
         versionName "1.0"
 
+        buildConfigField "String", "WORDS", "${localProperties['words']}"
+        buildConfigField "String", "TRONGRID_API_KEY", "${localProperties['trongrid_api_key']}"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary true
@@ -54,7 +59,7 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.1'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.6.1'
 
-    implementation 'com.github.horizontalsystems:hd-wallet-kit-android:a74b51f'
+    implementation 'com.github.piratecash:hd-wallet-kit-android:a74b51f'
 
     implementation 'androidx.activity:activity-compose:1.7.1'
     implementation "androidx.compose.ui:ui:$compose_version"
