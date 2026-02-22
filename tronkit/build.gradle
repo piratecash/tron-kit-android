@@ -38,11 +38,11 @@ protobuf {
 
 android {
     namespace 'io.horizontalsystems.tronkit'
-    compileSdk 33
+    compileSdk 34
 
     defaultConfig {
         minSdk 27
-        targetSdk 33
+        targetSdk 34
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles "consumer-rules.pro"
@@ -65,7 +65,7 @@ android {
 
 dependencies {
 
-    implementation 'com.github.horizontalsystems:hd-wallet-kit-android:a74b51f'
+    implementation 'com.github.piratecash:hd-wallet-kit-android:a74b51f'
 
     implementation 'org.bouncycastle:bcpkix-jdk15on:1.70'
 

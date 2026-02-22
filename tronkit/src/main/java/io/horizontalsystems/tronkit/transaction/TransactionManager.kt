@@ -49,14 +49,27 @@ class TransactionManager(
         }.filter { it.isNotEmpty() }
     }
 
-    suspend fun getFullTransactions(tags: List<List<String>>, fromHash: ByteArray? = null, limit: Int? = null): List<FullTransaction> {
+    suspend fun getFullTransactionsBefore(tags: List<List<String>>, fromHash: ByteArray? = null, limit: Int? = null): List<FullTransaction> {
         val transactions = storage.getTransactionsBefore(tags, fromHash, limit)
         return decorationManager.decorateTransactions(transactions)
     }
 
+    suspend fun getFullTransactionsAfter(tags: List<List<String>>, fromHash: ByteArray? = null, limit: Int? = null): List<FullTransaction> =
+        storage.getTransactionsAfter(tags, fromHash, limit)
+            .let { transactions ->
+                decorationManager.decorateTransactions(transactions)
+            }
+
     fun getFullTransactions(hashes: List<ByteArray>): List<FullTransaction> {
         val transactions = storage.getTransactions(hashes)
         return decorationManager.decorateTransactions(transactions)
+    }
+
+    suspend fun getPendingTransactions(tags: List<List<String>>): List<FullTransaction> {
+        return storage.getPendingTransactions(tags)
+            .let { transactions ->
+                decorationManager.decorateTransactions(transactions)
+            }
     }
 
     fun handle(createdTransaction: CreatedTransaction) {
