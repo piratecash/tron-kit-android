@@ -13,7 +13,6 @@ import io.horizontalsystems.tronkit.rpc.*
 import io.horizontalsystems.tronkit.toRawHexString
 import io.reactivex.Single
 import kotlinx.coroutines.rx2.await
-import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -45,15 +44,11 @@ class TronGridService(
 
     init {
         val loggingInterceptor = HttpLoggingInterceptor { message -> logger.info(message) }.setLevel(HttpLoggingInterceptor.Level.BASIC)
-        val headersInterceptor = Interceptor { chain ->
-            val requestBuilder = chain.request().newBuilder()
-            requestBuilder.header("TRON-PRO-API-KEY", apiKeyProvider.apiKey())
-            chain.proceed(requestBuilder.build())
-        }
+        val rateLimitInterceptor = RateLimitInterceptor(apiKeyProvider)
 
         val httpClient = OkHttpClient.Builder()
+            .addInterceptor(rateLimitInterceptor)
             .addInterceptor(loggingInterceptor)
-            .addInterceptor(headersInterceptor)
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
 
