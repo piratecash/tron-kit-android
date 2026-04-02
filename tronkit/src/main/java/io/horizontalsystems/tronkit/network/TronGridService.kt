@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.logging.Logger
 
+@Deprecated("Use TronGridProvider instead", ReplaceWith("TronGridProvider"))
 class TronGridService(
     network: Network,
     private val apiKeyProvider: ApiKeyProvider

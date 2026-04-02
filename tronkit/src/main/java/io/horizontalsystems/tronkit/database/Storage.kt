@@ -214,6 +214,23 @@ class Storage(
         database.chainParameterDao().insert(chainParameters)
     }
 
+    fun saveTrxBalance(balance: BigInteger) {
+        database.balanceDao().insert(Balance(trxBalanceId(), balance))
+    }
+
+    fun saveTrc20Balance(balance: BigInteger, contractAddress: String) {
+        database.balanceDao().insert(Balance(trc20BalanceId(contractAddress), balance))
+    }
+
+    fun clearTrc20Balances() {
+        database.balanceDao().deleteTrc20Balances()
+    }
+
+    fun allTrc20Addresses(): List<String> {
+        return database.balanceDao().getTrc20Ids()
+            .map { it.removePrefix("TRC20|") }
+    }
+
     private fun trxBalanceId() = "TRX"
     private fun trc10BalanceId(assetId: String) = "TRC10|$assetId"
     private fun trc20BalanceId(contractAddress: String) = "TRC20|$contractAddress"
