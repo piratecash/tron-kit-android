@@ -10,13 +10,18 @@ import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
 import io.horizontalsystems.hdwalletkit.Mnemonic
 import io.horizontalsystems.tronkit.TronKit
+import io.horizontalsystems.tronkit.contracts.ContractMethodHelper
+import io.horizontalsystems.tronkit.contracts.trc20.TransferMethod
 import io.horizontalsystems.tronkit.models.Address
 import io.horizontalsystems.tronkit.models.FullTransaction
+import io.horizontalsystems.tronkit.models.TriggerSmartContract
 import io.horizontalsystems.tronkit.network.CreatedTransaction
 import io.horizontalsystems.tronkit.network.Network
+import io.horizontalsystems.tronkit.rpc.JsonRpc
 import io.horizontalsystems.tronkit.rpc.Trc20Provider
 import io.horizontalsystems.tronkit.transaction.Fee
 import io.horizontalsystems.tronkit.transaction.Signer
+import io.horizontalsystems.tronkit.toRawHexString
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.math.BigInteger
@@ -26,6 +31,13 @@ class MainViewModel(
     private val signer: Signer,
     private val trc20Provider: Trc20Provider
 ) : ViewModel() {
+
+    companion object {
+        private val testUsdtContractAddress = Address.fromBase58("TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t")
+        private val testUsdtHolderAddress = Address.fromBase58("TB1WQmj63bHV9Qmuhp39WABzutphMAetSc")
+        private val testRecipientAddress = Address.fromBase58("TDoRr9CQsGoVb66CJRBsaWbBLRaZmLpfMr")
+        private val testUsdtAmount = BigInteger.valueOf(12_000_000)
+    }
 
     var balance: String by mutableStateOf(kit.trxBalance.toBigDecimal().movePointLeft(6).toPlainString())
         private set
@@ -39,7 +51,12 @@ class MainViewModel(
     var transactions: List<FullTransaction> by mutableStateOf(listOf())
         private set
 
+    var estimateEnergyTestResult: String by mutableStateOf("Not started")
+        private set
+
     init {
+        Log.e("e", "walletAddress: ${kit.address.base58} / ${kit.address.hex}")
+
         viewModelScope.launch {
             kit.start()
         }
@@ -95,11 +112,7 @@ class MainViewModel(
     }
 
     private suspend fun sendTrc20() {
-        val triggerSmartContract = kit.transferTrc20TriggerSmartContract(
-            contractAddress = Address.fromBase58("TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj"),
-            toAddress = Address.fromBase58("TDoRr9CQsGoVb66CJRBsaWbBLRaZmLpfMr"),
-            amount = BigInteger.valueOf(12_000_000)
-        )
+        val triggerSmartContract = usdtTransferTriggerSmartContract()
 
         val fees = kit.estimateFee(triggerSmartContract)
         Log.e("e", "fees: ${fees.size}")
@@ -119,6 +132,61 @@ class MainViewModel(
             feeLimit = energyFeeLimit
         )
         Log.e("e", "sendResult: $sendResult")
+    }
+
+    private fun usdtTransferTriggerSmartContract(): TriggerSmartContract =
+        kit.transferTrc20TriggerSmartContract(
+            contractAddress = testUsdtContractAddress,
+            toAddress = testRecipientAddress,
+            amount = testUsdtAmount
+        )
+
+    private fun estimateUsdtTransferTriggerSmartContract(): TriggerSmartContract {
+        val transferMethod = TransferMethod(testRecipientAddress, testUsdtAmount)
+
+        return TriggerSmartContract(
+            data = transferMethod.encodedABI().toRawHexString(),
+            ownerAddress = testUsdtHolderAddress,
+            contractAddress = testUsdtContractAddress,
+            callTokenValue = null,
+            callValue = null,
+            tokenId = null,
+            functionSelector = TransferMethod.methodSignature,
+            parameter = ContractMethodHelper
+                .encodedABI(methodId = byteArrayOf(), arguments = transferMethod.getArguments())
+                .toRawHexString()
+        )
+    }
+
+    fun estimateEnergyTest() {
+        viewModelScope.launch(Dispatchers.Default) {
+            estimateEnergyTestResult = "Running..."
+
+            try {
+                val triggerSmartContract = estimateUsdtTransferTriggerSmartContract()
+                val fees = kit.estimateFee(triggerSmartContract)
+                val energyFee = fees.find { it is Fee.Energy } as? Fee.Energy
+                val totalFee = fees.sumOf { it.feeInSuns }
+
+                estimateEnergyTestResult = buildString {
+                    appendLine("Success")
+                    appendLine("Fees count: ${fees.size}")
+                    appendLine("Energy: ${energyFee?.required ?: "none"}")
+                    appendLine("Energy fee: ${energyFee?.feeInSuns ?: "none"}")
+                    append("Total fee: $totalFee")
+                }
+            } catch (error: Throwable) {
+                Log.e("e", "estimateEnergyTest error", error)
+                estimateEnergyTestResult = buildString {
+                    appendLine("Failed")
+                    appendLine(error.javaClass.simpleName)
+                    when (error) {
+                        is JsonRpc.ResponseError.RpcError -> append("code=${error.error.code}, message=${error.error.message}")
+                        else -> append(error.message ?: "No message")
+                    }
+                }
+            }
+        }
     }
 
     fun sendTrxTest() {

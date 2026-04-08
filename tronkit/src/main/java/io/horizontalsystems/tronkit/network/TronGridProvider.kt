@@ -192,6 +192,28 @@ class TronGridProvider(
         return response.energy_required
     }
 
+    override suspend fun triggerConstantContract(
+        ownerAddress: String,
+        contractAddress: String,
+        functionSelector: String,
+        parameter: String
+    ): Long {
+        val response = extensionApi.triggerConstantContract(
+            TriggerConstantContractRequest(
+                owner_address = ownerAddress,
+                contract_address = contractAddress,
+                function_selector = functionSelector,
+                parameter = parameter
+            )
+        ).await()
+
+        check(response.result.result) {
+            "triggerConstantContract error: ${response.result.code} - ${hexStringToUtf8String(response.result.message)}"
+        }
+
+        return response.energy_used
+    }
+
     // IHistoryProvider
 
     override suspend fun fetchAccountInfo(address: String): AccountInfo {
@@ -328,6 +350,10 @@ class TronGridProvider(
         @POST("wallet/estimateenergy")
         @Headers("Content-Type: application/json", "Accept: application/json")
         fun estimateEnergy(@Body request: EstimateEnergyRequest): Single<EstimateEnergyResponse>
+
+        @POST("wallet/triggerconstantcontract")
+        @Headers("Content-Type: application/json", "Accept: application/json")
+        fun triggerConstantContract(@Body request: TriggerConstantContractRequest): Single<TriggerConstantContractResponse>
 
         @POST("wallet/broadcasttransaction")
         @Headers("Content-Type: application/json", "Accept: application/json")

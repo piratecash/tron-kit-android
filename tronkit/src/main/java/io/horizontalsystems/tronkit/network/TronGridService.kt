@@ -361,6 +361,19 @@ data class EstimateEnergyResponse(
     val energy_required: Long
 )
 
+data class TriggerConstantContractRequest(
+    val owner_address: String,
+    val contract_address: String,
+    val function_selector: String,
+    val parameter: String,
+    val visible: Boolean = false
+)
+
+data class TriggerConstantContractResponse(
+    val result: Result,
+    val energy_used: Long
+)
+
 data class Result(
     val result: Boolean,
     val code: String,

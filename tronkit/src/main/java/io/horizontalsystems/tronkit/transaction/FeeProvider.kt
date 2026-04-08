@@ -76,6 +76,37 @@ class FeeProvider(
         return transaction.serializedSize + MAX_RESULT_SIZE_IN_TX
     }
 
+    private suspend fun estimateEnergy(contract: TriggerSmartContract): Long {
+        return try {
+            nodeApiProvider.estimateEnergy(
+                ownerAddress = contract.ownerAddress.hex,
+                contractAddress = contract.contractAddress.hex,
+                functionSelector = contract.functionSelector
+                    ?: throw TronKit.TransactionError.NoFunctionSelector(contract),
+                parameter = contract.parameter
+                    ?: throw TronKit.TransactionError.NoParameter(contract)
+            )
+        } catch (error: Throwable) {
+            if (!error.isUnsupportedEstimateEnergy()) {
+                throw error
+            }
+
+            nodeApiProvider.triggerConstantContract(
+                ownerAddress = contract.ownerAddress.hex,
+                contractAddress = contract.contractAddress.hex,
+                functionSelector = contract.functionSelector
+                    ?: throw TronKit.TransactionError.NoFunctionSelector(contract),
+                parameter = contract.parameter
+                    ?: throw TronKit.TransactionError.NoParameter(contract)
+            )
+        }
+    }
+
+    private fun Throwable.isUnsupportedEstimateEnergy(): Boolean {
+        val message = message ?: return false
+        return message.contains("does not support estimate energy", ignoreCase = true)
+    }
+
     suspend fun estimateFee(contract: Contract): List<Fee> {
         val fees = mutableListOf<Fee>()
         var feeLimit: Long = 0
@@ -94,14 +125,7 @@ class FeeProvider(
             }
 
             is TriggerSmartContract -> {
-                val energyRequired = nodeApiProvider.estimateEnergy(
-                    ownerAddress = contract.ownerAddress.hex,
-                    contractAddress = contract.contractAddress.hex,
-                    functionSelector = contract.functionSelector
-                        ?: throw TronKit.TransactionError.NoFunctionSelector(contract),
-                    parameter = contract.parameter
-                        ?: throw TronKit.TransactionError.NoParameter(contract)
-                )
+                val energyRequired = estimateEnergy(contract)
                 val feeEnergy = Fee.Energy(required = energyRequired, price = chainParameterManager.energyFee)
                 fees.add(feeEnergy)
 

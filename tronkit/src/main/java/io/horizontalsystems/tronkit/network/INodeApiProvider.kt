@@ -21,6 +21,12 @@ interface INodeApiProvider {
         functionSelector: String,
         parameter: String
     ): Long
+    suspend fun triggerConstantContract(
+        ownerAddress: String,
+        contractAddress: String,
+        functionSelector: String,
+        parameter: String
+    ): Long
 }
 
 data class NodeAccountResponse(val balance: BigInteger)
