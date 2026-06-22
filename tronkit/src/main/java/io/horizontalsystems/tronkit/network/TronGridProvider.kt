@@ -4,10 +4,9 @@ import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
+import io.horizontalsystems.tronkit.TronKit.TransactionError
 import io.horizontalsystems.tronkit.hexStringToByteArray
 import io.horizontalsystems.tronkit.models.AccountInfo
-import io.horizontalsystems.tronkit.models.Address
-import io.horizontalsystems.tronkit.models.ChainParameter
 import io.horizontalsystems.tronkit.models.Trc20Balance
 import io.horizontalsystems.tronkit.rpc.BigIntegerTypeAdapter
 import io.horizontalsystems.tronkit.rpc.ByteArrayTypeAdapter
@@ -15,13 +14,12 @@ import io.horizontalsystems.tronkit.rpc.IntTypeAdapter
 import io.horizontalsystems.tronkit.rpc.JsonRpc
 import io.horizontalsystems.tronkit.rpc.LongTypeAdapter
 import io.horizontalsystems.tronkit.rpc.RpcResponse
-import io.horizontalsystems.tronkit.toRawHexString
 import io.reactivex.Single
 import kotlinx.coroutines.rx2.await
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
-import okhttp3.Response
 import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.adapter.rxjava2.RxJava2CallAdapterFactory
 import retrofit2.converter.gson.GsonConverterFactory
@@ -154,19 +152,33 @@ class TronGridProvider(
         return response.transaction
     }
 
-    override suspend fun broadcastTransaction(createdTransaction: CreatedTransaction, signature: ByteArray) {
-        val response = extensionApi.broadcastTransaction(
-            SignedTransaction(
-                visible = createdTransaction.visible,
-                txID = createdTransaction.txID,
-                raw_data = createdTransaction.raw_data,
-                raw_data_hex = createdTransaction.raw_data_hex,
-                signature = listOf(signature.toRawHexString())
-            )
-        ).await()
+    override suspend fun broadcastTransaction(
+        createdTransaction: CreatedTransaction,
+        signature: ByteArray
+    ) {
+        broadcastTransaction(createdTransaction.signedTransaction(signature))
+    }
 
-        check(response.result) {
-            "broadcastTransaction error: ${response.code} - ${hexStringToUtf8String(response.message)}"
+    override suspend fun broadcastTransaction(signedTransaction: SignedTransaction): String {
+        val response = extensionApi.broadcastTransaction(signedTransaction).await()
+
+        if (!response.result) {
+            throw TransactionError.BroadcastFailed(
+                code = response.code.orEmpty(),
+                message = hexStringToUtf8String(response.message),
+                txId = response.txid
+            )
+        }
+
+        return response.txid?.takeIf { it.isNotBlank() } ?: signedTransaction.txID
+    }
+
+    override suspend fun transactionExists(txId: String): Boolean {
+        return try {
+            val response = extensionApi.getTransactionById(GetTransactionByIdRequest(txId)).await()
+            response.get("txID")?.asString?.equals(txId, ignoreCase = true) == true
+        } catch (error: HttpException) {
+            if (error.code() == 404) false else throw error
         }
     }
 
@@ -208,7 +220,11 @@ class TronGridProvider(
         ).await()
 
         check(response.result.result) {
-            "triggerConstantContract error: ${response.result.code} - ${hexStringToUtf8String(response.result.message)}"
+            "triggerConstantContract error: ${response.result.code} - ${
+                hexStringToUtf8String(
+                    response.result.message
+                )
+            }"
         }
 
         return response.energy_used
@@ -278,8 +294,8 @@ class TronGridProvider(
 
     // Helpers
 
-    private fun hexStringToUtf8String(hexString: String) = try {
-        String(hexString.hexStringToByteArray())
+    private fun hexStringToUtf8String(hexString: String?) = try {
+        hexString?.let { String(it.hexStringToByteArray()) }
     } catch (_: Throwable) {
         hexString
     }
@@ -358,6 +374,10 @@ class TronGridProvider(
         @POST("wallet/broadcasttransaction")
         @Headers("Content-Type: application/json", "Accept: application/json")
         fun broadcastTransaction(@Body signedTransaction: SignedTransaction): Single<BroadcastTransactionResponse>
+
+        @POST("wallet/gettransactionbyid")
+        @Headers("Content-Type: application/json", "Accept: application/json")
+        fun getTransactionById(@Body request: GetTransactionByIdRequest): Single<JsonObject>
 
         @GET("wallet/getchainparameters")
         fun getChainParameters(): Single<ChainParametersResponse>

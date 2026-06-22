@@ -7,6 +7,8 @@ import io.horizontalsystems.tronkit.models.TransferContract
 import io.horizontalsystems.tronkit.models.TriggerSmartContract
 import io.horizontalsystems.tronkit.network.CreatedTransaction
 import io.horizontalsystems.tronkit.network.INodeApiProvider
+import io.horizontalsystems.tronkit.network.SignedTransaction
+import io.horizontalsystems.tronkit.network.signedTransaction
 import org.tron.protos.Protocol.Transaction
 
 class TransactionSender(
@@ -57,9 +59,16 @@ class TransactionSender(
     }
 
     suspend fun broadcastTransaction(createdTransaction: CreatedTransaction, signer: Signer): String {
-        val signature = signer.sign(createdTransaction)
-        nodeApiProvider.broadcastTransaction(createdTransaction, signature)
-        return createdTransaction.txID
+        val signedTransaction = signTransaction(createdTransaction, signer)
+        nodeApiProvider.broadcastTransaction(signedTransaction)
+        return createdTransaction.txID.lowercase()
+    }
+
+    internal fun signedRawTransaction(createdTransaction: CreatedTransaction, signer: Signer) =
+        RawTransactionUtils.encode(signTransaction(createdTransaction, signer))
+
+    internal fun signTransaction(createdTransaction: CreatedTransaction, signer: Signer): SignedTransaction {
+        return createdTransaction.signedTransaction(signer.sign(createdTransaction))
     }
 
 }

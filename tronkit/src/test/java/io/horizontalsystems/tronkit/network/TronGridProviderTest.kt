@@ -1,5 +1,6 @@
 package io.horizontalsystems.tronkit.network
 
+import io.horizontalsystems.tronkit.TronKit.TransactionError
 import io.horizontalsystems.tronkit.rpc.BlockNumberJsonRpc
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
@@ -153,7 +154,7 @@ class TronGridProviderTest {
     // --- broadcastTransaction ---
 
     @Test
-    fun broadcastTransaction_failure_throwsWithMessage() = runBlocking {
+    fun broadcastTransaction_failure_throwsTypedError() = runBlocking {
         val provider = createProvider()
 
         val createdTransaction = CreatedTransaction(
@@ -180,10 +181,39 @@ class TronGridProviderTest {
 
         try {
             provider.broadcastTransaction(createdTransaction, byteArrayOf(0x01, 0x02))
-            fail("Expected IllegalStateException")
-        } catch (e: IllegalStateException) {
-            assertTrue(e.message?.contains("broadcastTransaction error") == true)
+            fail("Expected BroadcastFailed")
+        } catch (e: TransactionError.BroadcastFailed) {
+            assertEquals("SIGERROR", e.code)
+            assertEquals("signature error", e.message)
         }
+    }
+
+    @Test
+    fun transactionExists_emptyObject_returnsFalse() = runBlocking {
+        val provider = createProvider()
+
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .addHeader("Content-Type", "application/json")
+                .setBody("""{}""")
+        )
+
+        assertEquals(false, provider.transactionExists("abc123"))
+    }
+
+    @Test
+    fun transactionExists_matchingTxId_returnsTrue() = runBlocking {
+        val provider = createProvider()
+
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .addHeader("Content-Type", "application/json")
+                .setBody("""{"txID":"abc123"}""")
+        )
+
+        assertTrue(provider.transactionExists("ABC123"))
     }
 
     // --- Rate limiting / key rotation ---

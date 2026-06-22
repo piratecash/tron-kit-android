@@ -225,8 +225,8 @@ class TronGridService(
         return response.chainParameter
     }
 
-    private fun hexStringToUtf8String(hexString: String) = try {
-        String(hexString.hexStringToByteArray())
+    private fun hexStringToUtf8String(hexString: String?) = try {
+        hexString?.let { String(it.hexStringToByteArray()) }
     } catch (_: Throwable) {
         hexString
     }
@@ -304,6 +304,12 @@ class TronGridService(
         fun broadcastTransaction(
             @Body signedTransaction: SignedTransaction
         ): Single<BroadcastTransactionResponse>
+
+        @POST("wallet/gettransactionbyid")
+        @Headers("Content-Type: application/json", "Accept: application/json")
+        fun getTransactionById(
+            @Body request: GetTransactionByIdRequest
+        ): Single<JsonObject>
 
         @GET("wallet/getchainparameters")
         fun getChainParameters(): Single<ChainParametersResponse>
@@ -388,11 +394,15 @@ data class SignedTransaction(
     val signature: List<String>
 )
 
+data class GetTransactionByIdRequest(
+    val value: String
+)
+
 data class BroadcastTransactionResponse(
     val result: Boolean,
-    val txid: String,
-    val code: String,
-    val message: String
+    val txid: String?,
+    val code: String?,
+    val message: String?
 )
 
 data class ContractTransactionsResponse(

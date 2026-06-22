@@ -14,7 +14,10 @@ import io.horizontalsystems.tronkit.decoration.trc20.Trc20TransactionDecorator
 import io.horizontalsystems.tronkit.models.Address
 import io.horizontalsystems.tronkit.models.Contract
 import io.horizontalsystems.tronkit.models.FullTransaction
+import io.horizontalsystems.tronkit.models.RawTransactionBroadcastResult
+import io.horizontalsystems.tronkit.models.RawTransactionRetryMetadata
 import io.horizontalsystems.tronkit.models.RpcSource
+import io.horizontalsystems.tronkit.models.SignedRawTronTransaction
 import io.horizontalsystems.tronkit.models.TransactionSource
 import io.horizontalsystems.tronkit.models.TransferContract
 import io.horizontalsystems.tronkit.models.TriggerSmartContract
@@ -30,6 +33,7 @@ import io.horizontalsystems.tronkit.sync.Syncer
 import io.horizontalsystems.tronkit.sync.TransactionSyncer
 import io.horizontalsystems.tronkit.transaction.Fee
 import io.horizontalsystems.tronkit.transaction.FeeProvider
+import io.horizontalsystems.tronkit.transaction.RawTransactionBroadcaster
 import io.horizontalsystems.tronkit.transaction.Signer
 import io.horizontalsystems.tronkit.transaction.TransactionManager
 import io.horizontalsystems.tronkit.transaction.TransactionSender
@@ -52,6 +56,7 @@ class TronKit(
     private val accountInfoManager: AccountInfoManager,
     private val transactionManager: TransactionManager,
     private val transactionSender: TransactionSender,
+    private val rawTransactionBroadcaster: RawTransactionBroadcaster,
     private val feeProvider: FeeProvider,
     private val chainParameterManager: ChainParameterManager,
     private val allowanceManager: AllowanceManager
@@ -104,6 +109,7 @@ class TronKit(
             syncer.start(s)
             transactionSyncer?.start(s)
             transactionSyncer?.sync()
+            s.launch { rawTransactionBroadcaster.retryQueued() }
         }
     }
 
@@ -126,6 +132,7 @@ class TronKit(
     fun refresh() {
         syncer.refresh()
         transactionSyncer?.sync()
+        scope?.launch { rawTransactionBroadcaster.retryQueued() }
     }
 
     fun getTrc20Balance(contractAddress: String): BigInteger {
@@ -211,6 +218,26 @@ class TronKit(
         return send(createdTransaction, signer)
     }
 
+    suspend fun signedTransaction(contract: Contract, signer: Signer, feeLimit: Long? = null): SignedRawTronTransaction {
+        val createdTransaction = transactionSender.createTransaction(contract, feeLimit)
+        return signedTransaction(createdTransaction, signer)
+    }
+
+    suspend fun signedTransaction(createdTransaction: CreatedTransaction, signer: Signer): SignedRawTronTransaction {
+        return transactionSender.signedRawTransaction(createdTransaction, signer)
+    }
+
+    suspend fun broadcastRawTransaction(
+        rawTransaction: ByteArray,
+        retryMetadata: RawTransactionRetryMetadata? = null
+    ): RawTransactionBroadcastResult {
+        return rawTransactionBroadcaster.broadcast(rawTransaction, retryMetadata)
+    }
+
+    suspend fun retryRawTransactionBroadcasts() {
+        rawTransactionBroadcaster.retryQueued()
+    }
+
     suspend fun send(createdTransaction: CreatedTransaction, signer: Signer): String {
         val txId = transactionSender.broadcastTransaction(createdTransaction, signer)
         transactionManager.handle(createdTransaction)
@@ -265,6 +292,13 @@ class TronKit(
         class NoFunctionSelector(val triggerSmartContract: TriggerSmartContract) : TransactionError()
         class NoParameter(val triggerSmartContract: TriggerSmartContract) : TransactionError()
         class NoFeeLimit(val triggerSmartContract: TriggerSmartContract) : TransactionError()
+        class InvalidRawTransaction(override val message: String?) : TransactionError()
+        class RawTransactionExpired(val txId: String, val expiration: Long) : TransactionError()
+        class BroadcastFailed(
+            val code: String,
+            override val message: String?,
+            val txId: String?
+        ) : TransactionError()
     }
 
     companion object {
@@ -341,6 +375,7 @@ class TronKit(
             )
 
             val transactionSender = TransactionSender(tronGridProvider)
+            val rawTransactionBroadcaster = RawTransactionBroadcaster(tronGridProvider, storage)
             val feeProvider = FeeProvider(tronGridProvider, chainParameterManager)
             val allowanceManager = AllowanceManager(address, tronGridProvider)
 
@@ -352,6 +387,7 @@ class TronKit(
                 accountInfoManager,
                 transactionManager,
                 transactionSender,
+                rawTransactionBroadcaster,
                 feeProvider,
                 chainParameterManager,
                 allowanceManager

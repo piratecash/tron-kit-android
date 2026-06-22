@@ -5,6 +5,7 @@ import io.horizontalsystems.tronkit.models.Balance
 import io.horizontalsystems.tronkit.models.ChainParameter
 import io.horizontalsystems.tronkit.models.InternalTransaction
 import io.horizontalsystems.tronkit.models.LastBlockHeight
+import io.horizontalsystems.tronkit.models.RawTransactionBroadcastRecord
 import io.horizontalsystems.tronkit.models.Transaction
 import io.horizontalsystems.tronkit.models.TransactionSyncState
 import io.horizontalsystems.tronkit.models.TransactionTag
@@ -212,6 +213,26 @@ class Storage(
 
     fun saveChainParameters(chainParameters: List<ChainParameter>) {
         database.chainParameterDao().insert(chainParameters)
+    }
+
+    fun insertRawTransactionBroadcastRecord(record: RawTransactionBroadcastRecord) {
+        database.rawTransactionBroadcastDao().insert(record)
+    }
+
+    fun updateRawTransactionBroadcastRecord(record: RawTransactionBroadcastRecord) {
+        database.rawTransactionBroadcastDao().update(record)
+    }
+
+    fun deleteRawTransactionBroadcastRecord(txId: String) {
+        database.rawTransactionBroadcastDao().delete(txId)
+    }
+
+    fun deleteExpiredRawTransactionBroadcastRecords(now: Long) {
+        database.rawTransactionBroadcastDao().deleteExpired(now)
+    }
+
+    fun rawTransactionBroadcastRecordsDue(lastAttemptBefore: Long, now: Long): List<RawTransactionBroadcastRecord> {
+        return database.rawTransactionBroadcastDao().dueRecords(lastAttemptBefore, now)
     }
 
     fun saveTrxBalance(balance: BigInteger) {

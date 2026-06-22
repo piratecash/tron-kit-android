@@ -15,6 +15,8 @@ interface INodeApiProvider {
         feeLimit: Long
     ): CreatedTransaction
     suspend fun broadcastTransaction(createdTransaction: CreatedTransaction, signature: ByteArray)
+    suspend fun broadcastTransaction(signedTransaction: SignedTransaction): String
+    suspend fun transactionExists(txId: String): Boolean
     suspend fun estimateEnergy(
         ownerAddress: String,
         contractAddress: String,
