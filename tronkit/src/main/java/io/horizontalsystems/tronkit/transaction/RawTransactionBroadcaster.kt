@@ -126,7 +126,7 @@ class RawTransactionBroadcaster(
         now: Long
     ): RawTransactionBroadcastResult {
         if (error.isKnownSubmitted(decoded.txId)) {
-            return RawTransactionBroadcastResult(decoded.txId, RawTransactionBroadcastStatus.Submitted)
+            return RawTransactionBroadcastResult(decoded.txId, RawTransactionBroadcastStatus.AlreadyKnown)
         }
 
         if (error.isPermanent() || retryMetadata == null) throw error

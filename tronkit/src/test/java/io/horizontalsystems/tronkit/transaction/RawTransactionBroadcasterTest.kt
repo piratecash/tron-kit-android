@@ -57,7 +57,7 @@ class RawTransactionBroadcasterTest {
     }
 
     @Test
-    fun broadcast_knownSubmitted_returnsSubmittedWithoutQueue() = runTest {
+    fun broadcast_knownSubmitted_returnsAlreadyKnownWithoutQueue() = runTest {
         coEvery { nodeApiProvider.broadcastTransaction(any()) } throws TransactionError.BroadcastFailed(
             code = "DUP_TRANSACTION_ERROR",
             message = "duplicate",
@@ -66,12 +66,12 @@ class RawTransactionBroadcasterTest {
 
         val result = broadcaster.broadcast(RAW_TRANSACTION, RawTransactionRetryMetadata(EXPIRATION))
 
-        assertEquals(RawTransactionBroadcastStatus.Submitted, result.status)
+        assertEquals(RawTransactionBroadcastStatus.AlreadyKnown, result.status)
         verify(exactly = 0) { storage.insertRawTransactionBroadcastRecord(any()) }
     }
 
     @Test
-    fun broadcast_matchingTxIdError_returnsSubmittedWithoutQueue() = runTest {
+    fun broadcast_matchingTxIdError_returnsAlreadyKnownWithoutQueue() = runTest {
         coEvery { nodeApiProvider.broadcastTransaction(any()) } throws TransactionError.BroadcastFailed(
             code = "UNKNOWN_ERROR",
             message = "already known",
@@ -80,7 +80,7 @@ class RawTransactionBroadcasterTest {
 
         val result = broadcaster.broadcast(RAW_TRANSACTION, RawTransactionRetryMetadata(EXPIRATION))
 
-        assertEquals(RawTransactionBroadcastStatus.Submitted, result.status)
+        assertEquals(RawTransactionBroadcastStatus.AlreadyKnown, result.status)
         verify(exactly = 0) { storage.insertRawTransactionBroadcastRecord(any()) }
     }
 
