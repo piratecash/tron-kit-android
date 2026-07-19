@@ -3,6 +3,7 @@ package io.horizontalsystems.tronkit.network
 import com.google.gson.annotations.SerializedName
 import io.horizontalsystems.tronkit.models.AccountInfo
 import io.horizontalsystems.tronkit.models.Trc20Balance
+import okhttp3.EventListener
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -16,7 +17,8 @@ import java.util.logging.Logger
 
 class TronScanProvider(
     baseUrl: URL,
-    private val apiKey: String?
+    private val apiKey: String?,
+    eventListenerFactory: EventListener.Factory? = null
 ) : IHistoryProvider {
 
     private val logger = Logger.getLogger("TronScanProvider")
@@ -36,6 +38,7 @@ class TronScanProvider(
             }
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
+            .apply { eventListenerFactory?.let { eventListenerFactory(it) } }
             .build()
 
         api = Retrofit.Builder()

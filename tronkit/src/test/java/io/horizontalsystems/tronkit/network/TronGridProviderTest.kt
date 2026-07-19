@@ -1,5 +1,6 @@
 package io.horizontalsystems.tronkit.network
 
+import io.horizontalsystems.tronkit.CountingEventListenerFactory
 import io.horizontalsystems.tronkit.TronKit.TransactionError
 import io.horizontalsystems.tronkit.rpc.BlockNumberJsonRpc
 import kotlinx.coroutines.runBlocking
@@ -273,5 +274,22 @@ class TronGridProviderTest {
             "No TRON-PRO-API-KEY header expected when apiKeys is empty",
             request.getHeader("TRON-PRO-API-KEY")
         )
+    }
+
+    @Test
+    fun eventListenerFactory_whenProvided_isInvokedForRequest() = runBlocking {
+        val factory = CountingEventListenerFactory()
+        val provider = TronGridProvider(server.url("/").toUrl(), listOf("testKey"), null, factory)
+
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .addHeader("Content-Type", "application/json")
+                .setBody("""{"jsonrpc":"2.0","id":1,"result":"0x1234"}""")
+        )
+
+        provider.fetch(BlockNumberJsonRpc())
+
+        assertTrue("EventListener.Factory must be invoked for the request", factory.count.get() > 0)
     }
 }

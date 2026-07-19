@@ -1,5 +1,6 @@
 package io.horizontalsystems.tronkit.network
 
+import io.horizontalsystems.tronkit.CountingEventListenerFactory
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -389,5 +390,16 @@ class TronScanProviderTest {
 
         val request = server.takeRequest()
         assertNull(request.getHeader("TRON-PRO-API-KEY"))
+    }
+
+    @Test
+    fun eventListenerFactory_whenProvided_isInvokedForRequest() = runBlocking {
+        val factory = CountingEventListenerFactory()
+        val provider = TronScanProvider(server.url("/").toUrl(), "test-api-key", factory)
+        enqueueJson("""{"data": [{"balance": 0, "trc20token_balances": []}]}""")
+
+        provider.fetchAccountInfo("TAddr")
+
+        assertTrue("EventListener.Factory must be invoked for the request", factory.count.get() > 0)
     }
 }

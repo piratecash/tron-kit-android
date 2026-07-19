@@ -37,6 +37,7 @@ import io.horizontalsystems.tronkit.transaction.RawTransactionBroadcaster
 import io.horizontalsystems.tronkit.transaction.Signer
 import io.horizontalsystems.tronkit.transaction.TransactionManager
 import io.horizontalsystems.tronkit.transaction.TransactionSender
+import okhttp3.EventListener
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -323,10 +324,11 @@ class TronKit(
             network: Network,
             rpcSource: RpcSource,
             transactionSource: TransactionSource?,
-            walletId: String
+            walletId: String,
+            eventListenerFactory: EventListener.Factory? = null
         ): TronKit {
             val address = getAddress(seed, network)
-            return getInstance(application, address, network, rpcSource, transactionSource, walletId)
+            return getInstance(application, address, network, rpcSource, transactionSource, walletId, eventListenerFactory)
         }
 
         fun getInstance(
@@ -335,16 +337,17 @@ class TronKit(
             network: Network,
             rpcSource: RpcSource,
             transactionSource: TransactionSource?,
-            walletId: String
+            walletId: String,
+            eventListenerFactory: EventListener.Factory? = null
         ): TronKit {
-            val tronGridProvider = TronGridProvider(rpcSource.urls.first(), rpcSource.apiKeys, rpcSource.auth)
+            val tronGridProvider = TronGridProvider(rpcSource.urls.first(), rpcSource.apiKeys, rpcSource.auth, eventListenerFactory)
 
             val historyProvider: IHistoryProvider? = transactionSource?.let { source ->
                 when (source.type) {
                     is TransactionSource.SourceType.TronGrid ->
-                        TronGridProvider(source.type.url, source.type.apiKeys)
+                        TronGridProvider(source.type.url, source.type.apiKeys, eventListenerFactory = eventListenerFactory)
                     is TransactionSource.SourceType.TronScan ->
-                        TronScanProvider(source.type.url, source.type.apiKey)
+                        TronScanProvider(source.type.url, source.type.apiKey, eventListenerFactory)
                 }
             }
 
@@ -400,14 +403,16 @@ class TronKit(
             seed: ByteArray,
             network: Network,
             tronGridApiKeys: List<String>,
-            walletId: String
+            walletId: String,
+            eventListenerFactory: EventListener.Factory? = null
         ): TronKit = getInstance(
             application,
             seed,
             network,
             RpcSource.tronGrid(network, tronGridApiKeys),
             TransactionSource.tronGrid(network, tronGridApiKeys),
-            walletId
+            walletId,
+            eventListenerFactory
         )
 
         fun getInstance(
@@ -415,14 +420,16 @@ class TronKit(
             address: Address,
             network: Network,
             tronGridApiKeys: List<String>,
-            walletId: String
+            walletId: String,
+            eventListenerFactory: EventListener.Factory? = null
         ): TronKit = getInstance(
             application,
             address,
             network,
             RpcSource.tronGrid(network, tronGridApiKeys),
             TransactionSource.tronGrid(network, tronGridApiKeys),
-            walletId
+            walletId,
+            eventListenerFactory
         )
     }
 }

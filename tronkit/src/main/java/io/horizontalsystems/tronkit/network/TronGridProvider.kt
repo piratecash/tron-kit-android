@@ -16,6 +16,7 @@ import io.horizontalsystems.tronkit.rpc.LongTypeAdapter
 import io.horizontalsystems.tronkit.rpc.RpcResponse
 import io.reactivex.Single
 import kotlinx.coroutines.rx2.await
+import okhttp3.EventListener
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -40,7 +41,8 @@ import java.util.logging.Logger
 class TronGridProvider(
     baseUrl: URL,
     apiKeys: List<String>,
-    private val auth: String? = null
+    private val auth: String? = null,
+    eventListenerFactory: EventListener.Factory? = null
 ) : IRpcApiProvider, INodeApiProvider, IHistoryProvider {
 
     private var currentRpcId = AtomicInteger(0)
@@ -76,6 +78,7 @@ class TronGridProvider(
             }
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
+            .apply { eventListenerFactory?.let { eventListenerFactory(it) } }
 
         val url = baseUrl.toString()
         gsonRpc = gson(isHex = true)
