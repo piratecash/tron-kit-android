@@ -37,6 +37,7 @@ import io.horizontalsystems.tronkit.transaction.RawTransactionBroadcaster
 import io.horizontalsystems.tronkit.transaction.Signer
 import io.horizontalsystems.tronkit.transaction.TransactionManager
 import io.horizontalsystems.tronkit.transaction.TransactionSender
+import io.horizontalsystems.tronkit.transaction.withExtendedExpiration
 import okhttp3.EventListener
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -222,6 +223,21 @@ class TronKit(
     suspend fun signedTransaction(contract: Contract, signer: Signer, feeLimit: Long? = null): SignedRawTronTransaction {
         val createdTransaction = transactionSender.createTransaction(contract, feeLimit)
         return signedTransaction(createdTransaction, signer)
+    }
+
+    /**
+     * Builds a transaction via the node (needs network) and re-stamps it with a later expiration so
+     * it can be signed offline and broadcast within [expirationDurationMs] instead of the node's short
+     * default. Call this while online; sign the result later offline via [signedTransaction].
+     */
+    suspend fun createOfflineTransaction(
+        contract: Contract,
+        expirationDurationMs: Long,
+        feeLimit: Long? = null,
+    ): CreatedTransaction {
+        require(expirationDurationMs > 0) { "expirationDurationMs must be positive" }
+        return transactionSender.createTransaction(contract, feeLimit)
+            .withExtendedExpiration(expirationDurationMs)
     }
 
     suspend fun signedTransaction(createdTransaction: CreatedTransaction, signer: Signer): SignedRawTronTransaction {
