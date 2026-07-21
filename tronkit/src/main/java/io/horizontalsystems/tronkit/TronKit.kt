@@ -23,6 +23,7 @@ import io.horizontalsystems.tronkit.models.TransferContract
 import io.horizontalsystems.tronkit.models.TriggerSmartContract
 import io.horizontalsystems.tronkit.network.ConnectionManager
 import io.horizontalsystems.tronkit.network.CreatedTransaction
+import io.horizontalsystems.tronkit.network.NowBlock
 import io.horizontalsystems.tronkit.network.IHistoryProvider
 import io.horizontalsystems.tronkit.network.Network
 import io.horizontalsystems.tronkit.network.TronGridProvider
@@ -33,6 +34,7 @@ import io.horizontalsystems.tronkit.sync.Syncer
 import io.horizontalsystems.tronkit.sync.TransactionSyncer
 import io.horizontalsystems.tronkit.transaction.Fee
 import io.horizontalsystems.tronkit.transaction.FeeProvider
+import io.horizontalsystems.tronkit.transaction.OfflineTransactionBuilder
 import io.horizontalsystems.tronkit.transaction.RawTransactionBroadcaster
 import io.horizontalsystems.tronkit.transaction.Signer
 import io.horizontalsystems.tronkit.transaction.TransactionManager
@@ -239,6 +241,29 @@ class TronKit(
         return transactionSender.createTransaction(contract, feeLimit)
             .withExtendedExpiration(expirationDurationMs)
     }
+
+    suspend fun getNowBlock(): NowBlock = transactionSender.getNowBlock()
+
+    /**
+     * Assembles a signable transaction locally (NO network) from a [block] anchor fetched earlier
+     * via [getNowBlock] while online. Enables fully offline building + signing for account-based
+     * Tron: fetch [block] online, then build and sign with no connectivity. The anchor stays usable
+     * until the block leaves the TAPOS window (~54h).
+     */
+    fun buildOfflineTransaction(
+        contract: Contract,
+        block: NowBlock,
+        timestamp: Long,
+        expiration: Long,
+        feeLimit: Long? = null,
+    ): CreatedTransaction = OfflineTransactionBuilder.build(
+        contract = contract,
+        refBlockNumber = block.number,
+        refBlockHashHex = block.blockId,
+        timestamp = timestamp,
+        expiration = expiration,
+        feeLimit = feeLimit,
+    )
 
     suspend fun signedTransaction(createdTransaction: CreatedTransaction, signer: Signer): SignedRawTronTransaction {
         return transactionSender.signedRawTransaction(createdTransaction, signer)

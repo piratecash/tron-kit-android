@@ -109,6 +109,15 @@ class TronGridProvider(
         return response.chainParameter.map { ChainParameterResponse(it.key, it.value) }
     }
 
+    override suspend fun getNowBlock(): NowBlock {
+        val response = extensionApi.getNowBlock().await()
+        return NowBlock(
+            number = response.block_header.raw_data.number,
+            blockId = response.blockID,
+            timestamp = response.block_header.raw_data.timestamp,
+        )
+    }
+
     override suspend fun createTransaction(
         ownerAddress: String,
         toAddress: String,
@@ -384,6 +393,9 @@ class TronGridProvider(
 
         @GET("wallet/getchainparameters")
         fun getChainParameters(): Single<ChainParametersResponse>
+
+        @GET("wallet/getnowblock")
+        fun getNowBlock(): Single<GetNowBlockResponse>
     }
 
     companion object {
@@ -396,3 +408,11 @@ data class GetAccountRequest(
     val address: String,
     val visible: Boolean = false
 )
+
+data class GetNowBlockResponse(
+    val blockID: String,
+    val block_header: BlockHeader,
+) {
+    data class BlockHeader(val raw_data: BlockRawData)
+    data class BlockRawData(val number: Long = 0, val timestamp: Long = 0)
+}

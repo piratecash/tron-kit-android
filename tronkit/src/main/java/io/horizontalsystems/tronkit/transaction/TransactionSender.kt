@@ -58,6 +58,8 @@ class TransactionSender(
         }
     }
 
+    suspend fun getNowBlock() = nodeApiProvider.getNowBlock()
+
     suspend fun broadcastTransaction(createdTransaction: CreatedTransaction, signer: Signer): String {
         val signedTransaction = signTransaction(createdTransaction, signer)
         nodeApiProvider.broadcastTransaction(signedTransaction)
