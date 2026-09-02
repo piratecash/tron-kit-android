@@ -1,11 +1,8 @@
 package io.horizontalsystems.tronkit.transaction
 
-import io.horizontalsystems.hdwalletkit.Utils
 import io.horizontalsystems.tronkit.TronKit.TransactionError
-import io.horizontalsystems.tronkit.hexStringToByteArray
 import io.horizontalsystems.tronkit.network.RawData
 import io.horizontalsystems.tronkit.network.SignedTransaction
-import io.horizontalsystems.tronkit.toRawHexString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -142,7 +139,7 @@ class RawTransactionUtilsTest {
 
     companion object {
         private const val RAW_DATA_HEX = "0a020001"
-        private val TX_ID = Utils.sha256(RAW_DATA_HEX.hexStringToByteArray()).toRawHexString()
+        private const val TX_ID = "3ed18018f2c212ac35ff419a9def1d4e9e2f6217faca22ff75f90213df3f5400"
         private const val EXPIRATION = 1_700_000_300_000L
         private val SIGNATURE = "01".repeat(65)
     }
