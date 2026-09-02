@@ -13,7 +13,6 @@ import io.horizontalsystems.tronkit.rpc.*
 import io.horizontalsystems.tronkit.toRawHexString
 import io.reactivex.Single
 import kotlinx.coroutines.rx2.await
-import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -26,6 +25,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.logging.Logger
 
+@Deprecated("Use TronGridProvider instead", ReplaceWith("TronGridProvider"))
 class TronGridService(
     network: Network,
     private val apiKeyProvider: ApiKeyProvider
@@ -45,15 +45,11 @@ class TronGridService(
 
     init {
         val loggingInterceptor = HttpLoggingInterceptor { message -> logger.info(message) }.setLevel(HttpLoggingInterceptor.Level.BASIC)
-        val headersInterceptor = Interceptor { chain ->
-            val requestBuilder = chain.request().newBuilder()
-            requestBuilder.header("TRON-PRO-API-KEY", apiKeyProvider.apiKey())
-            chain.proceed(requestBuilder.build())
-        }
+        val rateLimitInterceptor = RateLimitInterceptor(apiKeyProvider)
 
         val httpClient = OkHttpClient.Builder()
+            .addInterceptor(rateLimitInterceptor)
             .addInterceptor(loggingInterceptor)
-            .addInterceptor(headersInterceptor)
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
 
@@ -229,8 +225,8 @@ class TronGridService(
         return response.chainParameter
     }
 
-    private fun hexStringToUtf8String(hexString: String) = try {
-        String(hexString.hexStringToByteArray())
+    private fun hexStringToUtf8String(hexString: String?) = try {
+        hexString?.let { String(it.hexStringToByteArray()) }
     } catch (_: Throwable) {
         hexString
     }
@@ -309,6 +305,12 @@ class TronGridService(
             @Body signedTransaction: SignedTransaction
         ): Single<BroadcastTransactionResponse>
 
+        @POST("wallet/gettransactionbyid")
+        @Headers("Content-Type: application/json", "Accept: application/json")
+        fun getTransactionById(
+            @Body request: GetTransactionByIdRequest
+        ): Single<JsonObject>
+
         @GET("wallet/getchainparameters")
         fun getChainParameters(): Single<ChainParametersResponse>
     }
@@ -365,6 +367,19 @@ data class EstimateEnergyResponse(
     val energy_required: Long
 )
 
+data class TriggerConstantContractRequest(
+    val owner_address: String,
+    val contract_address: String,
+    val function_selector: String,
+    val parameter: String,
+    val visible: Boolean = false
+)
+
+data class TriggerConstantContractResponse(
+    val result: Result,
+    val energy_used: Long
+)
+
 data class Result(
     val result: Boolean,
     val code: String,
@@ -379,11 +394,15 @@ data class SignedTransaction(
     val signature: List<String>
 )
 
+data class GetTransactionByIdRequest(
+    val value: String
+)
+
 data class BroadcastTransactionResponse(
     val result: Boolean,
-    val txid: String,
-    val code: String,
-    val message: String
+    val txid: String?,
+    val code: String?,
+    val message: String?
 )
 
 data class ContractTransactionsResponse(

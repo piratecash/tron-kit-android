@@ -14,21 +14,33 @@ import io.horizontalsystems.tronkit.decoration.trc20.Trc20TransactionDecorator
 import io.horizontalsystems.tronkit.models.Address
 import io.horizontalsystems.tronkit.models.Contract
 import io.horizontalsystems.tronkit.models.FullTransaction
+import io.horizontalsystems.tronkit.models.RawTransactionBroadcastResult
+import io.horizontalsystems.tronkit.models.RawTransactionRetryMetadata
+import io.horizontalsystems.tronkit.models.RpcSource
+import io.horizontalsystems.tronkit.models.SignedRawTronTransaction
+import io.horizontalsystems.tronkit.models.TransactionSource
 import io.horizontalsystems.tronkit.models.TransferContract
 import io.horizontalsystems.tronkit.models.TriggerSmartContract
-import io.horizontalsystems.tronkit.network.ApiKeyProvider
 import io.horizontalsystems.tronkit.network.ConnectionManager
 import io.horizontalsystems.tronkit.network.CreatedTransaction
+import io.horizontalsystems.tronkit.network.NowBlock
+import io.horizontalsystems.tronkit.network.IHistoryProvider
 import io.horizontalsystems.tronkit.network.Network
-import io.horizontalsystems.tronkit.network.TronGridService
+import io.horizontalsystems.tronkit.network.TronGridProvider
+import io.horizontalsystems.tronkit.network.TronScanProvider
 import io.horizontalsystems.tronkit.sync.ChainParameterManager
 import io.horizontalsystems.tronkit.sync.SyncTimer
 import io.horizontalsystems.tronkit.sync.Syncer
+import io.horizontalsystems.tronkit.sync.TransactionSyncer
 import io.horizontalsystems.tronkit.transaction.Fee
 import io.horizontalsystems.tronkit.transaction.FeeProvider
+import io.horizontalsystems.tronkit.transaction.OfflineTransactionBuilder
+import io.horizontalsystems.tronkit.transaction.RawTransactionBroadcaster
 import io.horizontalsystems.tronkit.transaction.Signer
 import io.horizontalsystems.tronkit.transaction.TransactionManager
 import io.horizontalsystems.tronkit.transaction.TransactionSender
+import io.horizontalsystems.tronkit.transaction.withExtendedExpiration
+import okhttp3.EventListener
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -44,9 +56,11 @@ class TronKit(
     val address: Address,
     val network: Network,
     private val syncer: Syncer,
+    private val transactionSyncer: TransactionSyncer?,
     private val accountInfoManager: AccountInfoManager,
     private val transactionManager: TransactionManager,
     private val transactionSender: TransactionSender,
+    private val rawTransactionBroadcaster: RawTransactionBroadcaster,
     private val feeProvider: FeeProvider,
     private val chainParameterManager: ChainParameterManager,
     private val allowanceManager: AllowanceManager
@@ -60,6 +74,12 @@ class TronKit(
     val lastBlockHeightFlow: StateFlow<Long>
         get() = syncer.lastBlockHeightFlow
 
+    val accountActive: Boolean
+        get() = accountInfoManager.accountActive
+
+    val accountActiveFlow: StateFlow<Boolean>
+        get() = accountInfoManager.accountActiveFlow
+
     val trxBalance: BigInteger
         get() = accountInfoManager.trxBalance
 
@@ -72,32 +92,51 @@ class TronKit(
     val syncStateFlow: StateFlow<SyncState>
         get() = syncer.syncStateFlow
 
+    val transactionsSyncState: SyncState
+        get() = transactionSyncer?.syncState ?: SyncState.NotSynced(SyncError.NoTransactionSource())
+
+    val transactionsSyncStateFlow: StateFlow<SyncState>?
+        get() = transactionSyncer?.syncStateFlow
+
     val transactionsFlow: StateFlow<Pair<List<FullTransaction>, Boolean>>
         get() = transactionManager.transactionsFlow
+
+    fun watchTrc20(contractAddress: Address) {
+        accountInfoManager.watchTrc20(contractAddress)
+    }
 
     fun start() {
         if (started) return
         started = true
 
-        scope = CoroutineScope(Dispatchers.IO)
-            .apply {
-                syncer.start(this)
-
-                launch {
-                    chainParameterManager.sync()
-                }
-            }
+        scope = CoroutineScope(Dispatchers.IO).also { s ->
+            syncer.start(s)
+            transactionSyncer?.start(s)
+            transactionSyncer?.sync()
+            s.launch { rawTransactionBroadcaster.retryQueued() }
+        }
     }
 
     fun stop() {
         started = false
         syncer.stop()
+        transactionSyncer?.stop()
 
         scope?.cancel()
     }
 
+    fun pause() {
+        syncer.pause()
+    }
+
+    fun resume() {
+        syncer.resume()
+    }
+
     fun refresh() {
         syncer.refresh()
+        transactionSyncer?.sync()
+        scope?.launch { rawTransactionBroadcaster.retryQueued() }
     }
 
     fun getTrc20Balance(contractAddress: String): BigInteger {
@@ -137,9 +176,8 @@ class TronKit(
     }
 
     suspend fun estimateFee(createdTransaction: CreatedTransaction): List<Fee> {
-        // estimates fee for the first contract
         val contract = Contract.from(createdTransaction.raw_data.contract.firstOrNull())
-        return contract?.let { feeProvider.estimateFee(it) } ?: throw java.lang.IllegalStateException("No contract!")
+        return contract?.let { feeProvider.estimateFee(it) } ?: throw IllegalStateException("No contract!")
     }
 
     suspend fun isAccountActive(address: Address): Boolean {
@@ -184,16 +222,68 @@ class TronKit(
         return send(createdTransaction, signer)
     }
 
+    suspend fun signedTransaction(contract: Contract, signer: Signer, feeLimit: Long? = null): SignedRawTronTransaction {
+        val createdTransaction = transactionSender.createTransaction(contract, feeLimit)
+        return signedTransaction(createdTransaction, signer)
+    }
+
+    /**
+     * Builds a transaction via the node (needs network) and re-stamps it with a later expiration so
+     * it can be signed offline and broadcast within [expirationDurationMs] instead of the node's short
+     * default. Call this while online; sign the result later offline via [signedTransaction].
+     */
+    suspend fun createOfflineTransaction(
+        contract: Contract,
+        expirationDurationMs: Long,
+        feeLimit: Long? = null,
+    ): CreatedTransaction {
+        require(expirationDurationMs > 0) { "expirationDurationMs must be positive" }
+        return transactionSender.createTransaction(contract, feeLimit)
+            .withExtendedExpiration(expirationDurationMs)
+    }
+
+    suspend fun getNowBlock(): NowBlock = transactionSender.getNowBlock()
+
+    /**
+     * Assembles a signable transaction locally (NO network) from a [block] anchor fetched earlier
+     * via [getNowBlock] while online. Enables fully offline building + signing for account-based
+     * Tron: fetch [block] online, then build and sign with no connectivity. The anchor stays usable
+     * until the block leaves the TAPOS window (~54h).
+     */
+    fun buildOfflineTransaction(
+        contract: Contract,
+        block: NowBlock,
+        timestamp: Long,
+        expiration: Long,
+        feeLimit: Long? = null,
+    ): CreatedTransaction = OfflineTransactionBuilder.build(
+        contract = contract,
+        refBlockNumber = block.number,
+        refBlockHashHex = block.blockId,
+        timestamp = timestamp,
+        expiration = expiration,
+        feeLimit = feeLimit,
+    )
+
+    suspend fun signedTransaction(createdTransaction: CreatedTransaction, signer: Signer): SignedRawTronTransaction {
+        return transactionSender.signedRawTransaction(createdTransaction, signer)
+    }
+
+    suspend fun broadcastRawTransaction(
+        rawTransaction: ByteArray,
+        retryMetadata: RawTransactionRetryMetadata? = null
+    ): RawTransactionBroadcastResult {
+        return rawTransactionBroadcaster.broadcast(rawTransaction, retryMetadata)
+    }
+
+    suspend fun retryRawTransactionBroadcasts() {
+        rawTransactionBroadcaster.retryQueued()
+    }
+
     suspend fun send(createdTransaction: CreatedTransaction, signer: Signer): String {
-        val response = transactionSender.broadcastTransaction(createdTransaction, signer)
-
-        check(response.result) {
-            throw IllegalStateException(response.code + " " + response.message)
-        }
-
+        val txId = transactionSender.broadcastTransaction(createdTransaction, signer)
         transactionManager.handle(createdTransaction)
-
-        return response.txid
+        return txId
     }
 
     fun statusInfo(): Map<String, Any> {
@@ -202,6 +292,7 @@ class TronKit(
         statusInfo["Started"] = started
         statusInfo["Last Block Height"] = lastBlockHeight
         statusInfo["Sync State"] = syncState
+        statusInfo["Transactions Sync State"] = transactionsSyncState
         statusInfo["Chain Parameters Sync State"] = chainParameterManager.syncState
 
         return statusInfo
@@ -219,23 +310,14 @@ class TronKit(
         }
 
         override fun equals(other: Any?): Boolean {
-            if (other !is SyncState)
-                return false
-
-            if (other.javaClass != this.javaClass)
-                return false
-
-            if (other is Syncing && this is Syncing) {
-                return other.progress == this.progress
-            }
-
+            if (other !is SyncState) return false
+            if (other.javaClass != this.javaClass) return false
+            if (other is Syncing && this is Syncing) return other.progress == this.progress
             return true
         }
 
         override fun hashCode(): Int {
-            if (this is Syncing) {
-                return Objects.hashCode(this.progress)
-            }
+            if (this is Syncing) return Objects.hashCode(this.progress)
             return Objects.hashCode(this.javaClass.name)
         }
     }
@@ -243,6 +325,7 @@ class TronKit(
     sealed class SyncError : Throwable() {
         class NotStarted : SyncError()
         class NoNetworkConnection : SyncError()
+        class NoTransactionSource : SyncError()
     }
 
     sealed class TransactionError : Throwable() {
@@ -251,6 +334,13 @@ class TronKit(
         class NoFunctionSelector(val triggerSmartContract: TriggerSmartContract) : TransactionError()
         class NoParameter(val triggerSmartContract: TriggerSmartContract) : TransactionError()
         class NoFeeLimit(val triggerSmartContract: TriggerSmartContract) : TransactionError()
+        class InvalidRawTransaction(override val message: String?) : TransactionError()
+        class RawTransactionExpired(val txId: String, val expiration: Long) : TransactionError()
+        class BroadcastFailed(
+            val code: String,
+            override val message: String?,
+            val txId: String?
+        ) : TransactionError()
     }
 
     companion object {
@@ -264,17 +354,6 @@ class TronKit(
             TronDatabaseManager.clear(context, network, walletId)
         }
 
-        fun getInstance(
-            application: Application,
-            seed: ByteArray,
-            network: Network,
-            tronGridApiKeys: List<String>,
-            walletId: String
-        ): TronKit {
-            val address = getAddress(seed, network)
-            return getInstance(application, address, network, tronGridApiKeys, walletId)
-        }
-
         fun getAddress(seed: ByteArray, network: Network): Address {
             val privateKey = Signer.privateKey(seed, network)
             return Signer.address(privateKey, network)
@@ -282,14 +361,38 @@ class TronKit(
 
         fun getInstance(
             application: Application,
+            seed: ByteArray,
+            network: Network,
+            rpcSource: RpcSource,
+            transactionSource: TransactionSource?,
+            walletId: String,
+            eventListenerFactory: EventListener.Factory? = null
+        ): TronKit {
+            val address = getAddress(seed, network)
+            return getInstance(application, address, network, rpcSource, transactionSource, walletId, eventListenerFactory)
+        }
+
+        fun getInstance(
+            application: Application,
             address: Address,
             network: Network,
-            tronGridApiKeys: List<String>,
-            walletId: String
+            rpcSource: RpcSource,
+            transactionSource: TransactionSource?,
+            walletId: String,
+            eventListenerFactory: EventListener.Factory? = null
         ): TronKit {
+            val tronGridProvider = TronGridProvider(rpcSource.urls.first(), rpcSource.apiKeys, rpcSource.auth, eventListenerFactory)
+
+            val historyProvider: IHistoryProvider? = transactionSource?.let { source ->
+                when (source.type) {
+                    is TransactionSource.SourceType.TronGrid ->
+                        TronGridProvider(source.type.url, source.type.apiKeys, eventListenerFactory = eventListenerFactory)
+                    is TransactionSource.SourceType.TronScan ->
+                        TronScanProvider(source.type.url, source.type.apiKey, eventListenerFactory)
+                }
+            }
+
             val syncTimer = SyncTimer(30, ConnectionManager(application))
-            val apiKeyProvider = ApiKeyProvider(tronGridApiKeys)
-            val tronGridService = TronGridService(network, apiKeyProvider)
             val mainDatabase = TronDatabaseManager.getMainDatabase(application, network, walletId)
             val storage = Storage(mainDatabase)
             val accountInfoManager = AccountInfoManager(storage)
@@ -297,24 +400,77 @@ class TronKit(
                 addTransactionDecorator(Trc20TransactionDecorator(address))
             }
             val transactionManager = TransactionManager(address, storage, decorationManager, Gson())
-            val syncer = Syncer(address, syncTimer, tronGridService, accountInfoManager, transactionManager, storage)
-            val transactionSender = TransactionSender(tronGridService)
-            val chainParameterManager = ChainParameterManager(tronGridService, storage)
-            val feeProvider = FeeProvider(tronGridService, chainParameterManager)
-            val allowanceManager = AllowanceManager(address, tronGridService)
+            val chainParameterManager = ChainParameterManager(tronGridProvider, storage)
+
+            val transactionSyncer = historyProvider?.let {
+                TransactionSyncer(it, transactionManager, storage, address)
+            }
+
+            val syncer = Syncer(
+                address = address,
+                syncTimer = syncTimer,
+                rpcApiProvider = tronGridProvider,
+                nodeApiProvider = tronGridProvider,
+                historyProvider = historyProvider,
+                accountInfoManager = accountInfoManager,
+                chainParameterManager = chainParameterManager,
+                transactionSyncer = transactionSyncer,
+                storage = storage
+            )
+
+            val transactionSender = TransactionSender(tronGridProvider)
+            val rawTransactionBroadcaster = RawTransactionBroadcaster(tronGridProvider, storage)
+            val feeProvider = FeeProvider(tronGridProvider, chainParameterManager)
+            val allowanceManager = AllowanceManager(address, tronGridProvider)
 
             return TronKit(
                 address,
                 network,
                 syncer,
+                transactionSyncer,
                 accountInfoManager,
                 transactionManager,
                 transactionSender,
+                rawTransactionBroadcaster,
                 feeProvider,
                 chainParameterManager,
                 allowanceManager
             )
         }
-    }
 
+        // Backward-compatible overloads
+        fun getInstance(
+            application: Application,
+            seed: ByteArray,
+            network: Network,
+            tronGridApiKeys: List<String>,
+            walletId: String,
+            eventListenerFactory: EventListener.Factory? = null
+        ): TronKit = getInstance(
+            application,
+            seed,
+            network,
+            RpcSource.tronGrid(network, tronGridApiKeys),
+            TransactionSource.tronGrid(network, tronGridApiKeys),
+            walletId,
+            eventListenerFactory
+        )
+
+        fun getInstance(
+            application: Application,
+            address: Address,
+            network: Network,
+            tronGridApiKeys: List<String>,
+            walletId: String,
+            eventListenerFactory: EventListener.Factory? = null
+        ): TronKit = getInstance(
+            application,
+            address,
+            network,
+            RpcSource.tronGrid(network, tronGridApiKeys),
+            TransactionSource.tronGrid(network, tronGridApiKeys),
+            walletId,
+            eventListenerFactory
+        )
+    }
 }

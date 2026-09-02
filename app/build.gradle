@@ -42,9 +42,6 @@ android {
     buildFeatures {
         compose true
     }
-    composeOptions {
-        kotlinCompilerExtensionVersion '1.4.6'
-    }
     packagingOptions {
         resources {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
@@ -59,7 +56,7 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.1'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.6.1'
 
-    implementation 'com.github.piratecash:hd-wallet-kit-android:a74b51f'
+    implementation 'com.github.piratecash.hd-wallet-kit-android:hd-wallet-kit-kmp-android:1.0.1'
 
     implementation 'androidx.activity:activity-compose:1.7.1'
     implementation "androidx.compose.ui:ui:$compose_version"
