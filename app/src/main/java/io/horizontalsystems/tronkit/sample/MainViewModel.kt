@@ -24,7 +24,9 @@ import io.horizontalsystems.tronkit.transaction.Signer
 import io.horizontalsystems.tronkit.toRawHexString
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.math.BigInteger
+import java.security.MessageDigest
 
 class MainViewModel(
     private val kit: TronKit,
@@ -326,7 +328,11 @@ class MainViewModelFactory : ViewModelProvider.Factory {
         val apiKeys = listOf(BuildConfig.TRONGRID_API_KEY)
         val words = BuildConfig.WORDS.split(" ")
         val seed = Mnemonic().toSeed(words)
-        val kit = TronKit.getInstance(App.instance, seed, network, apiKeys, "tron-demo-app")
+        val walletId = "tron-demo-app"
+        // Demo only: a real app stores a random 32-byte key instead of deriving it from the seed.
+        val databaseKey = MessageDigest.getInstance("SHA-256").digest(seed)
+        runBlocking { TronKit.migrateDatabase(App.instance, network, walletId, databaseKey) }
+        val kit = TronKit.getInstance(App.instance, seed, network, apiKeys, walletId, databaseKey)
         val signer = Signer.getInstance(seed, network)
         val trc20Provider = Trc20Provider.getInstance(network, apiKeys)
 

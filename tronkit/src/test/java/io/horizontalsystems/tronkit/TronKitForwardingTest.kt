@@ -34,6 +34,8 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class TronKitForwardingTest {
 
+    private val databaseKey = ByteArray(32) { 7 }
+
     @After
     fun tearDown() {
         unmockkObject(TronKit.Companion)
@@ -56,6 +58,7 @@ class TronKitForwardingTest {
                 any<RpcSource>(),
                 any(),
                 any<String>(),
+                any<ByteArray>(),
                 captureNullable(captured)
             )
         } returns mockk(relaxed = true)
@@ -66,11 +69,11 @@ class TronKitForwardingTest {
         val transactionSource = TransactionSource.tronGrid(Network.Mainnet, listOf("key"))
 
         // Overload A: seed + RpcSource -> delegates to primary overload B
-        TronKit.getInstance(app, seed, Network.Mainnet, rpcSource, transactionSource, "wallet1", factory)
+        TronKit.getInstance(app, seed, Network.Mainnet, rpcSource, transactionSource, "wallet1", databaseKey, factory)
         // Overload D: address + tronGridApiKeys -> delegates to primary overload B
-        TronKit.getInstance(app, address, Network.Mainnet, listOf("key"), "wallet1", factory)
+        TronKit.getInstance(app, address, Network.Mainnet, listOf("key"), "wallet1", databaseKey, factory)
         // Overload C: seed + tronGridApiKeys -> delegates to overload A -> primary overload B
-        TronKit.getInstance(app, seed, Network.Mainnet, listOf("key"), "wallet1", factory)
+        TronKit.getInstance(app, seed, Network.Mainnet, listOf("key"), "wallet1", databaseKey, factory)
 
         assertEquals(3, captured.size)
         assertTrue("Every delegating overload must forward the exact same factory instance", captured.all { it === factory })
@@ -90,13 +93,15 @@ class TronKitForwardingTest {
 @Config(sdk = [34])
 class TronKitForwardingRpcProviderTest {
 
+    private val databaseKey = ByteArray(32) { 7 }
+
     private val createdKits = mutableListOf<TronKit>()
     private val createdDatabases = mutableListOf<MainDatabase>()
 
     @Before
     fun setUp() {
         mockkObject(TronDatabaseManager)
-        every { TronDatabaseManager.getMainDatabase(any(), any(), any()) } answers {
+        every { TronDatabaseManager.getMainDatabase(any(), any(), any(), any()) } answers {
             Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext<Application>(), MainDatabase::class.java)
                 .allowMainThreadQueries()
                 .build()
@@ -125,7 +130,7 @@ class TronKitForwardingRpcProviderTest {
             val rpcSource = RpcSource(listOf(server.url("/").toUrl()))
             val app = ApplicationProvider.getApplicationContext<Application>()
 
-            val kit = TronKit.getInstance(app, address, Network.Mainnet, rpcSource, null, "wallet-forwarding-test", factory)
+            val kit = TronKit.getInstance(app, address, Network.Mainnet, rpcSource, null, "wallet-forwarding-test", databaseKey, factory)
             createdKits.add(kit)
 
             server.enqueue(
@@ -198,7 +203,7 @@ class TronKitForwardingRpcProviderTest {
             historyServer.enqueue(jsonResponse(transactionsBody))
             historyServer.enqueue(jsonResponse(trc20TransactionsBody))
 
-            val kit = TronKit.getInstance(app, address, Network.Mainnet, rpcSource, transactionSource, walletId, factory)
+            val kit = TronKit.getInstance(app, address, Network.Mainnet, rpcSource, transactionSource, walletId, databaseKey, factory)
             createdKits.add(kit)
             kit.start()
 

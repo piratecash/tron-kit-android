@@ -1,6 +1,7 @@
 package io.horizontalsystems.tronkit.database
 
 import android.content.Context
+import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import java.math.BigInteger
 import java.nio.file.Files
@@ -23,7 +24,12 @@ class MainDatabaseVersion5CompatibilityTest {
         val fixture = requireNotNull(javaClass.getResourceAsStream("/databases/tron-v5-room-2.6.1.db"))
         fixture.use { Files.copy(it, databasePath) }
 
-        val database = MainDatabase.getInstance(context, databaseName)
+        // Robolectric cannot load the native SQLCipher library, so the plaintext fixture is opened by a plain
+        // Room builder with the kit's schema and migrations; the encrypted path is covered on desktop and device.
+        val database = Room.databaseBuilder(context, MainDatabase::class.java, databaseName)
+            .addMigrations(MainDatabase.MIGRATION_4_5)
+            .allowMainThreadQueries()
+            .build()
         try {
             assertEquals(62_345_678L, database.lastBlockHeightDao().getLastBlockHeight()?.height)
             assertEquals(BigInteger("123456789"), database.balanceDao().getBalance("TRX")?.balance)

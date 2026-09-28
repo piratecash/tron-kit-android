@@ -8,18 +8,36 @@ buildscript {
     }
 }// Top-level build file where you can add configuration options common to all sub-projects/modules.
 plugins {
-    id 'com.android.application' version '8.7.0' apply false
-    id 'com.android.library' version '8.7.0' apply false
+    id 'com.android.application' version '8.12.1' apply false
+    id 'com.android.library' version '8.12.1' apply false
     id 'org.jetbrains.kotlin.android' version '2.3.20' apply false
+    id 'org.jetbrains.kotlin.multiplatform' version '2.3.20' apply false
     id 'com.google.protobuf' version '0.9.3' apply false
     id 'org.jetbrains.kotlin.plugin.compose' version '2.3.20' apply false
     id 'com.google.devtools.ksp' version '2.3.2' apply false
+    id 'androidx.room' version '2.8.4' apply false
 }
+
+// Jitpack sets these as env vars; local/CI publish runs may pass them as -P properties instead.
+def resolvePublicationProperty = { name ->
+    providers.environmentVariable(name).orElse(providers.gradleProperty(name))
+}
+
+ext.publicationVersion = resolvePublicationProperty('JITPACK_VERSION')
+    .orElse(resolvePublicationProperty('VERSION'))
+    .orElse(resolvePublicationProperty('VERSION_NAME'))
+    .orElse(provider { '0.0.0-SNAPSHOT' })
+    .get()
 
 subprojects {
     tasks.withType(KotlinCompile).configureEach {
         compilerOptions {
             jvmDefault.set(JvmDefaultMode.DISABLE)
         }
+    }
+
+    if (name in ['tronkit', 'tronkit-proto']) {
+        group = 'com.github.piratecash.tron-kit-android'
+        version = rootProject.ext.publicationVersion
     }
 }

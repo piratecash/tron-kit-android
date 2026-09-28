@@ -1,8 +1,11 @@
 package io.horizontalsystems.tronkit
 
-import android.app.Application
-import android.content.Context
 import com.google.gson.Gson
+import io.horizontalsystems.sqlcipher.room.DatabaseKeyMismatchException
+import io.horizontalsystems.sqlcipher.room.DatabaseMigrationConflictException
+import io.horizontalsystems.sqlcipher.room.DatabaseMigrationInProgressException
+import io.horizontalsystems.sqlcipher.room.DatabaseMigrationRequiredException
+import io.horizontalsystems.sqlcipher.room.DatabaseMigrationResult
 import io.horizontalsystems.tronkit.account.AccountInfoManager
 import io.horizontalsystems.tronkit.contracts.ContractMethodHelper
 import io.horizontalsystems.tronkit.contracts.trc20.TransferMethod
@@ -350,35 +353,68 @@ class TronKit(
             Security.addProvider(InternalBouncyCastleProvider.getInstance())
         }
 
-        fun clear(context: Context, network: Network, walletId: String) {
+        /**
+         * Deletes the wallet's database files together with any leftovers of an interrupted migration.
+         * Throws [DatabaseMigrationConflictException] while another migration or clear runs in the same
+         * directory; retry later. Stop the kit first.
+         */
+        fun clear(context: PlatformContext, network: Network, walletId: String) {
             TronDatabaseManager.clear(context, network, walletId)
         }
+
+        /**
+         * Encrypts the wallet's existing plaintext database with [databaseKey] (exactly 32 bytes), keeping its
+         * data, and recovers an interrupted migration. Call it before [getInstance] for this [walletId], with
+         * the same key; it is idempotent. [DatabaseKeyMismatchException] means the stored database was
+         * encrypted with another key: it is kept unchanged, and only [clear] plus a new key (data lost)
+         * recovers. [DatabaseMigrationConflictException]: another migration or clear is running; retry later.
+         */
+        suspend fun migrateDatabase(
+            context: PlatformContext,
+            network: Network,
+            walletId: String,
+            databaseKey: ByteArray
+        ): DatabaseMigrationResult = TronDatabaseManager.migrateMainDatabase(context, network, walletId, databaseKey)
 
         fun getAddress(seed: ByteArray, network: Network): Address {
             val privateKey = Signer.privateKey(seed, network)
             return Signer.address(privateKey, network)
         }
 
+        /**
+         * [databaseKey] must be exactly 32 bytes and the same key given to [migrateDatabase], which must run
+         * first for this [walletId]. Throws [DatabaseMigrationRequiredException] or
+         * [DatabaseMigrationInProgressException] (call [migrateDatabase]) and [DatabaseKeyMismatchException]
+         * (the database is kept; only [clear] plus a new key recovers, losing the data).
+         */
         fun getInstance(
-            application: Application,
+            application: PlatformContext,
             seed: ByteArray,
             network: Network,
             rpcSource: RpcSource,
             transactionSource: TransactionSource?,
             walletId: String,
+            databaseKey: ByteArray,
             eventListenerFactory: EventListener.Factory? = null
         ): TronKit {
             val address = getAddress(seed, network)
-            return getInstance(application, address, network, rpcSource, transactionSource, walletId, eventListenerFactory)
+            return getInstance(application, address, network, rpcSource, transactionSource, walletId, databaseKey, eventListenerFactory)
         }
 
+        /**
+         * [databaseKey] must be exactly 32 bytes and the same key given to [migrateDatabase], which must run
+         * first for this [walletId]. Throws [DatabaseMigrationRequiredException] or
+         * [DatabaseMigrationInProgressException] (call [migrateDatabase]) and [DatabaseKeyMismatchException]
+         * (the database is kept; only [clear] plus a new key recovers, losing the data).
+         */
         fun getInstance(
-            application: Application,
+            application: PlatformContext,
             address: Address,
             network: Network,
             rpcSource: RpcSource,
             transactionSource: TransactionSource?,
             walletId: String,
+            databaseKey: ByteArray,
             eventListenerFactory: EventListener.Factory? = null
         ): TronKit {
             val tronGridProvider = TronGridProvider(rpcSource.urls.first(), rpcSource.apiKeys, rpcSource.auth, eventListenerFactory)
@@ -392,8 +428,9 @@ class TronKit(
                 }
             }
 
+            // Before ConnectionManager: opening the database can throw, and the manager registers a system callback.
+            val mainDatabase = TronDatabaseManager.getMainDatabase(application, network, walletId, databaseKey)
             val syncTimer = SyncTimer(30, ConnectionManager(application))
-            val mainDatabase = TronDatabaseManager.getMainDatabase(application, network, walletId)
             val storage = Storage(mainDatabase)
             val accountInfoManager = AccountInfoManager(storage)
             val decorationManager = DecorationManager(storage).apply {
@@ -439,12 +476,19 @@ class TronKit(
         }
 
         // Backward-compatible overloads
+        /**
+         * [databaseKey] must be exactly 32 bytes and the same key given to [migrateDatabase], which must run
+         * first for this [walletId]. Throws [DatabaseMigrationRequiredException] or
+         * [DatabaseMigrationInProgressException] (call [migrateDatabase]) and [DatabaseKeyMismatchException]
+         * (the database is kept; only [clear] plus a new key recovers, losing the data).
+         */
         fun getInstance(
-            application: Application,
+            application: PlatformContext,
             seed: ByteArray,
             network: Network,
             tronGridApiKeys: List<String>,
             walletId: String,
+            databaseKey: ByteArray,
             eventListenerFactory: EventListener.Factory? = null
         ): TronKit = getInstance(
             application,
@@ -453,15 +497,23 @@ class TronKit(
             RpcSource.tronGrid(network, tronGridApiKeys),
             TransactionSource.tronGrid(network, tronGridApiKeys),
             walletId,
+            databaseKey,
             eventListenerFactory
         )
 
+        /**
+         * [databaseKey] must be exactly 32 bytes and the same key given to [migrateDatabase], which must run
+         * first for this [walletId]. Throws [DatabaseMigrationRequiredException] or
+         * [DatabaseMigrationInProgressException] (call [migrateDatabase]) and [DatabaseKeyMismatchException]
+         * (the database is kept; only [clear] plus a new key recovers, losing the data).
+         */
         fun getInstance(
-            application: Application,
+            application: PlatformContext,
             address: Address,
             network: Network,
             tronGridApiKeys: List<String>,
             walletId: String,
+            databaseKey: ByteArray,
             eventListenerFactory: EventListener.Factory? = null
         ): TronKit = getInstance(
             application,
@@ -470,6 +522,7 @@ class TronKit(
             RpcSource.tronGrid(network, tronGridApiKeys),
             TransactionSource.tronGrid(network, tronGridApiKeys),
             walletId,
+            databaseKey,
             eventListenerFactory
         )
     }

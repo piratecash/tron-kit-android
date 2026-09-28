@@ -1,6 +1,6 @@
 package io.horizontalsystems.tronkit.database
 
-import androidx.sqlite.db.SimpleSQLiteQuery
+import androidx.room.RoomRawQuery
 import io.horizontalsystems.tronkit.models.Balance
 import io.horizontalsystems.tronkit.models.ChainParameter
 import io.horizontalsystems.tronkit.models.InternalTransaction
@@ -29,7 +29,7 @@ class Storage(
     }
 
     fun saveBalances(trxBalance: BigInteger, balances: List<Trc20Balance>) {
-        database.runInTransaction {
+        database.inTransaction {
             database.balanceDao().deleteAll()
 
             database.balanceDao().insert(Balance(trxBalanceId(), trxBalance))
@@ -104,7 +104,7 @@ class Storage(
                       $whereClause
                       """
 
-        return database.transactionDao().getTransactionsByRawQuery(SimpleSQLiteQuery(sqlQuery))
+        return database.transactionDao().getTransactionsByRawQuery(RoomRawQuery(sqlQuery))
     }
 
     fun saveTransactions(transactions: List<Transaction>) {
@@ -172,7 +172,7 @@ class Storage(
                       $limitClause
                       """
 
-        return database.transactionDao().getTransactionsByRawQuery(SimpleSQLiteQuery(sqlQuery))
+        return database.transactionDao().getTransactionsByRawQuery(RoomRawQuery(sqlQuery))
     }
 
     fun getInternalTransactions(): List<InternalTransaction> {

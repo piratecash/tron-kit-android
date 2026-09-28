@@ -1,10 +1,10 @@
 package io.horizontalsystems.tronkit.transaction
 
-import android.util.Log
 import com.google.gson.Gson
 import io.horizontalsystems.tronkit.database.Storage
 import io.horizontalsystems.tronkit.decoration.DecorationManager
 import io.horizontalsystems.tronkit.hexStringToByteArray
+import io.horizontalsystems.tronkit.logWarning
 import io.horizontalsystems.tronkit.models.Address
 import io.horizontalsystems.tronkit.models.FullTransaction
 import io.horizontalsystems.tronkit.models.InternalTransaction
@@ -164,7 +164,7 @@ class TransactionManager(
                     }
                 }
             } catch (error: Throwable) {
-                Log.w("e", "TransactionData parsing error", error)
+                logWarning("TransactionData parsing error", error)
             }
         }
 
@@ -219,7 +219,7 @@ class TransactionManager(
                     )
                 )
             } catch (error: Throwable) {
-                Log.w("e", "Contract TransactionData parsing error: ${it.transaction_id}", error)
+                logWarning("Contract TransactionData parsing error: ${it.transaction_id}", error)
             }
         }
 
