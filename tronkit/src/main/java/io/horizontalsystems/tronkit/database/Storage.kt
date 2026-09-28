@@ -1,10 +1,11 @@
 package io.horizontalsystems.tronkit.database
 
-import androidx.sqlite.db.SimpleSQLiteQuery
+import androidx.room.RoomRawQuery
 import io.horizontalsystems.tronkit.models.Balance
 import io.horizontalsystems.tronkit.models.ChainParameter
 import io.horizontalsystems.tronkit.models.InternalTransaction
 import io.horizontalsystems.tronkit.models.LastBlockHeight
+import io.horizontalsystems.tronkit.models.RawTransactionBroadcastRecord
 import io.horizontalsystems.tronkit.models.Transaction
 import io.horizontalsystems.tronkit.models.TransactionSyncState
 import io.horizontalsystems.tronkit.models.TransactionTag
@@ -28,7 +29,7 @@ class Storage(
     }
 
     fun saveBalances(trxBalance: BigInteger, balances: List<Trc20Balance>) {
-        database.runInTransaction {
+        database.inTransaction {
             database.balanceDao().deleteAll()
 
             database.balanceDao().insert(Balance(trxBalanceId(), trxBalance))
@@ -103,7 +104,7 @@ class Storage(
                       $whereClause
                       """
 
-        return database.transactionDao().getTransactionsByRawQuery(SimpleSQLiteQuery(sqlQuery))
+        return database.transactionDao().getTransactionsByRawQuery(RoomRawQuery(sqlQuery))
     }
 
     fun saveTransactions(transactions: List<Transaction>) {
@@ -171,7 +172,7 @@ class Storage(
                       $limitClause
                       """
 
-        return database.transactionDao().getTransactionsByRawQuery(SimpleSQLiteQuery(sqlQuery))
+        return database.transactionDao().getTransactionsByRawQuery(RoomRawQuery(sqlQuery))
     }
 
     fun getInternalTransactions(): List<InternalTransaction> {
@@ -212,6 +213,43 @@ class Storage(
 
     fun saveChainParameters(chainParameters: List<ChainParameter>) {
         database.chainParameterDao().insert(chainParameters)
+    }
+
+    fun insertRawTransactionBroadcastRecord(record: RawTransactionBroadcastRecord) {
+        database.rawTransactionBroadcastDao().insert(record)
+    }
+
+    fun updateRawTransactionBroadcastRecord(record: RawTransactionBroadcastRecord) {
+        database.rawTransactionBroadcastDao().update(record)
+    }
+
+    fun deleteRawTransactionBroadcastRecord(txId: String) {
+        database.rawTransactionBroadcastDao().delete(txId)
+    }
+
+    fun deleteExpiredRawTransactionBroadcastRecords(now: Long) {
+        database.rawTransactionBroadcastDao().deleteExpired(now)
+    }
+
+    fun rawTransactionBroadcastRecordsDue(lastAttemptBefore: Long, now: Long): List<RawTransactionBroadcastRecord> {
+        return database.rawTransactionBroadcastDao().dueRecords(lastAttemptBefore, now)
+    }
+
+    fun saveTrxBalance(balance: BigInteger) {
+        database.balanceDao().insert(Balance(trxBalanceId(), balance))
+    }
+
+    fun saveTrc20Balance(balance: BigInteger, contractAddress: String) {
+        database.balanceDao().insert(Balance(trc20BalanceId(contractAddress), balance))
+    }
+
+    fun clearTrc20Balances() {
+        database.balanceDao().deleteTrc20Balances()
+    }
+
+    fun allTrc20Addresses(): List<String> {
+        return database.balanceDao().getTrc20Ids()
+            .map { it.removePrefix("TRC20|") }
     }
 
     private fun trxBalanceId() = "TRX"

@@ -16,4 +16,10 @@ interface BalanceDao {
 
     @Query("SELECT * FROM Balance where id=:id")
     fun getBalance(id: String): Balance?
+
+    @Query("DELETE FROM Balance WHERE id LIKE 'TRC20|%'")
+    fun deleteTrc20Balances()
+
+    @Query("SELECT id FROM Balance WHERE id LIKE 'TRC20|%'")
+    fun getTrc20Ids(): List<String>
 }

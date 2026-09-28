@@ -1,17 +1,33 @@
 package io.horizontalsystems.tronkit.database
 
-import android.content.Context
+import io.horizontalsystems.sqlcipher.room.DatabaseMigrationResult
+import io.horizontalsystems.tronkit.PlatformContext
 import io.horizontalsystems.tronkit.network.Network
 
 internal object TronDatabaseManager {
 
-    fun getMainDatabase(context: Context, network: Network, walletId: String): MainDatabase {
-        return MainDatabase.getInstance(context, getDatabaseName(network, walletId))
+    fun getMainDatabase(context: PlatformContext, network: Network, walletId: String, databaseKey: ByteArray): MainDatabase {
+        return MainDatabase.getInstance(context, getDatabaseName(network, walletId), databaseKey)
     }
 
-    fun clear(context: Context, network: Network, walletId: String) {
+    suspend fun migrateMainDatabase(
+        context: PlatformContext,
+        network: Network,
+        walletId: String,
+        databaseKey: ByteArray
+    ): DatabaseMigrationResult {
+        return MainDatabase.migrateDatabase(context, getDatabaseName(network, walletId), databaseKey)
+    }
+
+    fun clear(context: PlatformContext, network: Network, walletId: String) {
         synchronized(this) {
-            context.deleteDatabase(getDatabaseName(network, walletId))
+            // Same migrationId as MainDatabase.migrateDatabase, so an interrupted migration's manifest is cleared too.
+            val file = databaseFile(context, getDatabaseName(network, walletId))
+            tronKitDatabases.clearDatabases(
+                dataDir = file.absoluteFile.parent,
+                databaseNames = listOf(file.name),
+                migrationId = file.path,
+            )
         }
     }
 

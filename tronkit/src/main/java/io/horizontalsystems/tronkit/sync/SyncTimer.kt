@@ -20,6 +20,7 @@ class SyncTimer(
     private var scope: CoroutineScope? = null
     private var isStarted = false
     private var timerJob: Job? = null
+    private var isPaused = false
     private var listener: Listener? = null
 
     init {
@@ -49,6 +50,7 @@ class SyncTimer(
 
     fun stop() {
         isStarted = false
+        isPaused = false
 
         connectionManager.stop()
         state = State.NotReady(TronKit.SyncError.NotStarted())
@@ -56,12 +58,28 @@ class SyncTimer(
         stopTimer()
     }
 
+    fun pause() {
+        if (!isStarted || isPaused) return
+        isPaused = true
+        stopTimer()
+    }
+
+    fun resume() {
+        if (!isStarted || !isPaused) return
+        isPaused = false
+        if (connectionManager.isConnected) {
+            startTimer()
+        }
+    }
+
     private fun handleConnectionChange() {
         if (!isStarted) return
 
         if (connectionManager.isConnected) {
             state = State.Ready
-            startTimer()
+            if (!isPaused) {
+                startTimer()
+            }
         } else {
             state = State.NotReady(TronKit.SyncError.NoNetworkConnection())
             stopTimer()
@@ -69,6 +87,7 @@ class SyncTimer(
     }
 
     private fun startTimer() {
+        timerJob?.cancel()
         timerJob = scope?.launch {
             flow {
                 while (isActive) {
