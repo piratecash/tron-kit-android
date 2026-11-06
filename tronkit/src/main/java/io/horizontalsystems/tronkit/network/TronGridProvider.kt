@@ -100,9 +100,37 @@ class TronGridProvider(
 
     override suspend fun fetchAccount(address: String): NodeAccountResponse? {
         val response = extensionApi.getAccount(GetAccountRequest(address)).await()
-        val balance = response["balance"]?.takeIf { !it.isJsonNull }?.asBigInteger ?: return null
-        return NodeAccountResponse(balance)
+        val balance = response["balance"]?.takeIf { !it.isJsonNull }?.asBigInteger
+        val hasAddress = response["address"]?.isJsonNull == false
+        if (balance == null && !hasAddress) return null
+        return accountWithPermissions(balance ?: BigInteger.ZERO, response)
     }
+
+    // Sync and fee estimation depend on fetchAccount, so bad permissions must not fail them.
+    private fun accountWithPermissions(balance: BigInteger, response: JsonObject) = try {
+        NodeAccountResponse(
+            balance = balance,
+            ownerPermission = response.getAsJsonObject("owner_permission")?.toNodePermission(),
+            activePermissions = response.getAsJsonArray("active_permission")
+                ?.map { it.asJsonObject.toNodePermission() }
+                .orEmpty(),
+        )
+    } catch (_: RuntimeException) {
+        NodeAccountResponse(balance)
+    }
+
+    // Read from the tree, not by Gson reflection, so R8 cannot break the field names.
+    // Protobuf omits zero values from the response, hence the defaults.
+    private fun JsonObject.toNodePermission() = NodePermission(
+        threshold = get("threshold")?.asLong ?: 0,
+        keys = getAsJsonArray("keys")
+            ?.map { key ->
+                val keyObject = key.asJsonObject
+                NodePermissionKey(keyObject.get("address").asString, keyObject.get("weight")?.asLong ?: 0)
+            }
+            .orEmpty(),
+        operations = get("operations")?.asString,
+    )
 
     override suspend fun fetchChainParameters(): List<ChainParameterResponse> {
         val response = extensionApi.getChainParameters().await()

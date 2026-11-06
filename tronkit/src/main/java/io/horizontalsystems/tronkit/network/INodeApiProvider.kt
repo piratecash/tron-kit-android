@@ -32,7 +32,15 @@ interface INodeApiProvider {
     ): Long
 }
 
-data class NodeAccountResponse(val balance: BigInteger)
+data class NodeAccountResponse(
+    val balance: BigInteger,
+    val ownerPermission: NodePermission? = null,
+    val activePermissions: List<NodePermission> = emptyList(),
+)
+
+data class NodePermission(val threshold: Long, val keys: List<NodePermissionKey>, val operations: String? = null)
+
+data class NodePermissionKey(val address: String, val weight: Long)
 
 data class ChainParameterResponse(val key: String, val value: Long)
 

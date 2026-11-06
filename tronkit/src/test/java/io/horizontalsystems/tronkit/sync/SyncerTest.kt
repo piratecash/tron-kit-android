@@ -2,6 +2,7 @@ package io.horizontalsystems.tronkit.sync
 
 import io.horizontalsystems.tronkit.TronKit.SyncState
 import io.horizontalsystems.tronkit.account.AccountInfoManager
+import io.horizontalsystems.tronkit.crypto.InternalBouncyCastleProvider
 import io.horizontalsystems.tronkit.database.Storage
 import io.horizontalsystems.tronkit.models.AccountInfo
 import io.horizontalsystems.tronkit.models.Address
@@ -9,7 +10,9 @@ import io.horizontalsystems.tronkit.network.IHistoryProvider
 import io.horizontalsystems.tronkit.network.INodeApiProvider
 import io.horizontalsystems.tronkit.network.IRpcApiProvider
 import io.horizontalsystems.tronkit.network.NodeAccountResponse
+import io.horizontalsystems.tronkit.network.TronGridProvider
 import io.horizontalsystems.tronkit.rpc.BlockNumberJsonRpc
+import io.horizontalsystems.tronkit.rpc.CallJsonRpc
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -21,11 +24,14 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.math.BigInteger
+import java.security.Security
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SyncerTest {
@@ -55,12 +61,16 @@ class SyncerTest {
         syncer = createSyncer(historyProvider = null)
     }
 
-    private fun createSyncer(historyProvider: IHistoryProvider?): Syncer {
+    private fun createSyncer(
+        historyProvider: IHistoryProvider?,
+        syncAddress: Address = address,
+        nodeApi: INodeApiProvider = nodeApiProvider,
+    ): Syncer {
         val s = Syncer(
-            address = address,
+            address = syncAddress,
             syncTimer = syncTimer,
             rpcApiProvider = rpcApiProvider,
-            nodeApiProvider = nodeApiProvider,
+            nodeApiProvider = nodeApi,
             historyProvider = historyProvider,
             accountInfoManager = accountInfoManager,
             chainParameterManager = chainParameterManager,
@@ -219,6 +229,41 @@ class SyncerTest {
 
         coVerify { accountInfoManager.handleInactiveAccount() }
         assertTrue(syncer.syncState is SyncState.Synced)
+    }
+
+    // --- RPC path, existing account with 0 TRX: real provider, it decides what "no balance" means ---
+
+    @Test
+    fun sync_rpcPathZeroBalanceAccount_handlesZeroAndSyncsTrc20() = testScope.runTest {
+        // TronKit.init does this in production; Syncer swallows the balanceOf failure without it.
+        Security.addProvider(InternalBouncyCastleProvider.getInstance())
+        val realAddress = Address.fromHex("41ce7ba9c4618bc93f00c6673f73042fc0a33f1b62")
+        val tokenAddress = Address.fromHex("410a38028ed6146aa29c687c052b233131468b6635")
+        val tokenBalance = BigInteger.valueOf(42)
+        every { accountInfoManager.trc20AddressesToSync() } returns listOf(tokenAddress)
+        coEvery { rpcApiProvider.fetch(ofType<BlockNumberJsonRpc>()) } returns 200L
+        coEvery { rpcApiProvider.fetch(ofType<CallJsonRpc>()) } returns ByteArray(32).also { it[31] = 42 }
+
+        MockWebServer().use { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .addHeader("Content-Type", "application/json")
+                    .setBody("""{"address": "${realAddress.hex}"}""")
+            )
+            val provider = TronGridProvider(server.url("/").toUrl(), emptyList())
+            val zeroBalanceSyncer = createSyncer(null, realAddress, provider)
+            simulateTimerReady(zeroBalanceSyncer)
+
+            zeroBalanceSyncer.sync()
+            advanceUntilIdle()
+
+            assertTrue(zeroBalanceSyncer.syncState is SyncState.Synced)
+        }
+
+        verify(exactly = 0) { accountInfoManager.handleInactiveAccount() }
+        verify { accountInfoManager.handle(BigInteger.ZERO) }
+        verify { accountInfoManager.handle(tokenBalance, tokenAddress) }
     }
 
     // --- Test 8: pause delegates to syncTimer ---

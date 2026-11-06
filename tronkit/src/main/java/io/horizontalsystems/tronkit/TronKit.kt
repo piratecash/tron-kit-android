@@ -14,6 +14,7 @@ import io.horizontalsystems.tronkit.database.Storage
 import io.horizontalsystems.tronkit.database.TronDatabaseManager
 import io.horizontalsystems.tronkit.decoration.DecorationManager
 import io.horizontalsystems.tronkit.decoration.trc20.Trc20TransactionDecorator
+import io.horizontalsystems.tronkit.models.AccountStatus
 import io.horizontalsystems.tronkit.models.Address
 import io.horizontalsystems.tronkit.models.Contract
 import io.horizontalsystems.tronkit.models.FullTransaction
@@ -185,6 +186,10 @@ class TronKit(
 
     suspend fun isAccountActive(address: Address): Boolean {
         return feeProvider.isAccountActive(address)
+    }
+
+    suspend fun accountStatus(address: Address): AccountStatus {
+        return feeProvider.accountStatus(address)
     }
 
     fun transferContract(amount: BigInteger, toAddress: Address) = TransferContract(

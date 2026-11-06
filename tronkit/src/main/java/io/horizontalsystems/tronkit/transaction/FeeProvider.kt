@@ -2,6 +2,7 @@ package io.horizontalsystems.tronkit.transaction
 
 import com.google.protobuf.ByteString
 import io.horizontalsystems.tronkit.TronKit
+import io.horizontalsystems.tronkit.models.AccountStatus
 import io.horizontalsystems.tronkit.models.Address
 import io.horizontalsystems.tronkit.models.Contract
 import io.horizontalsystems.tronkit.models.TransferAssetContract
@@ -48,6 +49,9 @@ class FeeProvider(
 
     suspend fun isAccountActive(address: Address) =
         nodeApiProvider.fetchAccount(address.hex) != null
+
+    suspend fun accountStatus(address: Address) =
+        AccountStatus.from(address, nodeApiProvider.fetchAccount(address.hex))
 
     private fun feesAccountActivation(): List<Fee> {
         return listOf(

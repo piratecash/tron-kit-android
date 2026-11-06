@@ -37,6 +37,15 @@ class TronGridProviderTest {
     ): TronGridProvider =
         TronGridProvider(server.url("/").toUrl(), apiKeys, auth)
 
+    private fun enqueueJson(body: String) {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .addHeader("Content-Type", "application/json")
+                .setBody(body)
+        )
+    }
+
     // --- JSON-RPC ---
 
     @Test
@@ -88,6 +97,91 @@ class TronGridProviderTest {
         val account = provider.fetchAccount("someAddress")
 
         assertNull(account)
+    }
+
+    @Test
+    fun fetchAccount_errorResponse_returnsNull() = runBlocking {
+        enqueueJson("""{"Error": "class java.lang.NullPointerException : null"}""")
+
+        assertNull(createProvider().fetchAccount("someAddress"))
+    }
+
+    @Test
+    fun fetchAccount_addressWithoutBalance_returnsZeroBalance() = runBlocking {
+        enqueueJson("""{"address": "41ce7ba9c4618bc93f00c6673f73042fc0a33f1b62"}""")
+
+        val account = createProvider().fetchAccount("someAddress")
+
+        assertEquals(BigInteger.ZERO, account?.balance)
+    }
+
+    @Test
+    fun fetchAccount_noPermissions_returnsNoPermissions() = runBlocking {
+        enqueueJson("""{"address": "41aa", "balance": 5}""")
+
+        val account = createProvider().fetchAccount("someAddress")
+
+        assertEquals(NodeAccountResponse(BigInteger.valueOf(5)), account)
+    }
+
+    @Test
+    fun fetchAccount_liveShapedPermissions_parsesThem() = runBlocking {
+        enqueueJson(
+            """
+            {
+              "address": "41aa",
+              "owner_permission": {
+                "permission_name": "owner",
+                "threshold": 100,
+                "keys": [{"address": "41AA", "weight": 1}, {"address": "41bb"}]
+              },
+              "active_permission": [
+                {
+                  "type": "Active",
+                  "id": 2,
+                  "threshold": 2,
+                  "operations": "0200",
+                  "keys": [{"address": "41cc", "weight": 50}]
+                },
+                {"type": "Active", "id": 3, "keys": []}
+              ],
+              "witness_permission": {"threshold": 1, "keys": [{"address": "41dd", "weight": 1}]}
+            }
+            """
+        )
+
+        val account = createProvider().fetchAccount("someAddress")
+
+        val expected = NodeAccountResponse(
+            balance = BigInteger.ZERO,
+            ownerPermission = NodePermission(
+                threshold = 100,
+                keys = listOf(NodePermissionKey("41AA", 1), NodePermissionKey("41bb", 0)),
+            ),
+            activePermissions = listOf(
+                NodePermission(2, listOf(NodePermissionKey("41cc", 50)), "0200"),
+                NodePermission(0, emptyList()),
+            ),
+        )
+        assertEquals(expected, account)
+    }
+
+    @Test
+    fun fetchAccount_malformedPermissions_returnsAccountWithoutPermissions() = runBlocking {
+        val provider = createProvider()
+        listOf(
+            """"owner_permission": "broken"""",
+            """"owner_permission": {"threshold": "abc", "keys": []}""",
+            """"owner_permission": {"threshold": 1, "keys": "broken"}""",
+            """"owner_permission": {"threshold": 1, "keys": [{"weight": 1}]}""",
+            """"owner_permission": {"threshold": 1, "keys": [{"address": "41aa", "weight": "abc"}]}""",
+            """"owner_permission": {"threshold": 1, "keys": []}, "active_permission": {}""",
+            """"owner_permission": {"threshold": 1, "keys": []}, "active_permission": ["broken"]""",
+        ).forEach { permissions ->
+            enqueueJson("""{"address": "41aa", "balance": 7, $permissions}""")
+
+            assertEquals(permissions, NodeAccountResponse(BigInteger.valueOf(7)), provider.fetchAccount("someAddress"))
+        }
     }
 
     // --- fetchAccountInfo ---

@@ -1,8 +1,11 @@
 package io.horizontalsystems.tronkit.transaction
 
+import io.horizontalsystems.tronkit.models.AccountStatus
 import io.horizontalsystems.tronkit.models.Address
+import io.horizontalsystems.tronkit.models.TransferContract
 import io.horizontalsystems.tronkit.models.TriggerSmartContract
 import io.horizontalsystems.tronkit.network.INodeApiProvider
+import io.horizontalsystems.tronkit.network.TronGridProvider
 import io.horizontalsystems.tronkit.sync.ChainParameterManager
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -10,7 +13,10 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -37,6 +43,14 @@ class FeeProviderTest {
         functionSelector = "transfer(address,uint256)",
         parameter = "00000000"
     )
+
+    private val transfer = TransferContract(BigInteger.ONE, ownerAddress, contractAddress)
+    private val zeroBalanceAccount = """
+        {
+          "address": "${contractAddress.hex}",
+          "owner_permission": {"threshold": 1, "keys": [{"address": "${contractAddress.hex}", "weight": 1}]}
+        }
+    """
 
     @Test
     fun estimateFee_triggerSmartContract_unsupportedEstimateEnergy_fallsBackToTriggerConstantContract() = runTest {
@@ -98,4 +112,74 @@ class FeeProviderTest {
         assertSame(originalError, thrownError)
         coVerify(exactly = 0) { apiProvider.triggerConstantContract(any(), any(), any(), any()) }
     }
+
+    @Test
+    fun estimateFee_transferToExistingZeroBalanceAccount_hasNoActivationFee() = runTest {
+        every { chainParameterManager.transactionFee } returns 1_000L
+
+        val fees = withAccountResponse(zeroBalanceAccount) { it.estimateFee(transfer) }
+
+        assertFalse(fees.any { it is Fee.AccountActivation })
+    }
+
+    @Test
+    fun estimateFee_transferToNeverActivatedAccount_hasActivationFee() = runTest {
+        every { chainParameterManager.createAccountFee } returns 100L
+        every { chainParameterManager.transactionFee } returns 1_000L
+        every { chainParameterManager.createNewAccountFeeInSystemContract } returns 1_000_000L
+
+        val fees = withAccountResponse("{}") { it.estimateFee(transfer) }
+
+        assertEquals(1_000_000L, fees.filterIsInstance<Fee.AccountActivation>().single().amount)
+    }
+
+    @Test
+    fun accountStatus_neverActivatedAccount_returnsNotActive() = runTest {
+        val status = withAccountResponse("{}") { it.accountStatus(ownerAddress) }
+
+        assertEquals(AccountStatus.NotActive, status)
+    }
+
+    @Test
+    fun accountStatus_zeroBalanceDefaultPermissions_returnsActive() = runTest {
+        val status = withAccountResponse(zeroBalanceAccount) { it.accountStatus(contractAddress) }
+
+        assertEquals(AccountStatus.Active, status)
+    }
+
+    @Test
+    fun accountStatus_foreignOwner_returnsControlledByOthers() = runTest {
+        val body = """
+            {
+              "address": "${ownerAddress.hex}",
+              "owner_permission": {"threshold": 1, "keys": [{"address": "${contractAddress.hex}", "weight": 1}]}
+            }
+        """
+
+        val status = withAccountResponse(body) { it.accountStatus(ownerAddress) }
+
+        assertEquals(AccountStatus.ControlledByOthers, status)
+    }
+
+    @Test
+    fun isAccountActive_zeroBalanceAccount_returnsTrue() = runTest {
+        assertTrue(withAccountResponse(zeroBalanceAccount) { it.isAccountActive(ownerAddress) })
+    }
+
+    @Test
+    fun isAccountActive_neverActivatedAccount_returnsFalse() = runTest {
+        assertFalse(withAccountResponse("{}") { it.isAccountActive(ownerAddress) })
+    }
+
+    // Through the real provider: the zero-balance contract lives in its JSON handling.
+    private suspend fun <T> withAccountResponse(body: String, block: suspend (FeeProvider) -> T): T =
+        MockWebServer().use { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .addHeader("Content-Type", "application/json")
+                    .setBody(body)
+            )
+            block(FeeProvider(TronGridProvider(server.url("/").toUrl(), emptyList()), chainParameterManager))
+        }
 }
