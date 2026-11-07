@@ -6,6 +6,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.execSQL
+import io.horizontalsystems.databasenaming.DatabaseNameResolver
 import io.horizontalsystems.sqlcipher.room.DatabaseKeyMismatchException
 import io.horizontalsystems.sqlcipher.room.DatabaseMigrationConflictException
 import io.horizontalsystems.sqlcipher.room.DatabaseMigrationInProgressException
@@ -79,10 +80,15 @@ abstract class MainDatabase : RoomDatabase() {
          * - [DatabaseMigrationRequiredException] or [DatabaseMigrationInProgressException]: call [migrateDatabase];
          * - [DatabaseKeyMismatchException]: the file is kept; only deleting it and using a new key (data lost) recovers.
          */
-        fun getInstance(context: PlatformContext, databaseName: String, databaseKey: ByteArray): MainDatabase {
+        fun getInstance(
+            context: PlatformContext,
+            databaseName: String,
+            databaseKey: ByteArray,
+            nameResolver: DatabaseNameResolver = DatabaseNameResolver.Identity,
+        ): MainDatabase {
             require(databaseKey.size == DATABASE_KEY_SIZE) { "Database key must contain exactly $DATABASE_KEY_SIZE bytes" }
-            requireValidDatabaseName(databaseName)
-            return mainDatabaseBuilder(context, databaseName, databaseKey)
+            val resolvedName = resolvedDatabaseName(databaseName, nameResolver)
+            return mainDatabaseBuilder(context, resolvedName, databaseKey, nameResolver)
                 .addMigrations(MIGRATION_4_5)
                 .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = false)
                 .build()
@@ -103,11 +109,11 @@ abstract class MainDatabase : RoomDatabase() {
             context: PlatformContext,
             databaseName: String,
             databaseKey: ByteArray,
+            nameResolver: DatabaseNameResolver = DatabaseNameResolver.Identity,
         ): DatabaseMigrationResult {
             require(databaseKey.size == DATABASE_KEY_SIZE) { "Database key must contain exactly $DATABASE_KEY_SIZE bytes" }
-            requireValidDatabaseName(databaseName)
-            val file = databaseFile(context, databaseName)
-            return tronKitDatabases.migrateDatabases(
+            val file = databaseFile(context, resolvedDatabaseName(databaseName, nameResolver))
+            return tronKitDatabases(nameResolver).migrateDatabases(
                 dataDir = file.absoluteFile.parent,
                 databaseNames = listOf(file.name),
                 migrationId = file.path,
@@ -115,16 +121,23 @@ abstract class MainDatabase : RoomDatabase() {
             )
         }
 
-        private fun requireValidDatabaseName(databaseName: String) {
+        private fun resolvedDatabaseName(defaultName: String, nameResolver: DatabaseNameResolver): String {
+            val databaseName = nameResolver.resolve(defaultName)
             val name = File(databaseName).name
+            val reservedPrefixes = listOf(
+                MIGRATION_FILE_STEM,
+                BITCOIN_KIT_MIGRATION_FILE_STEM,
+                ".${resolvedNamespace(nameResolver)}-sqlcipher",
+            )
             require(name.isNotBlank()) { "Database file name must not be blank: $databaseName" }
-            require(!name.startsWith(MIGRATION_FILE_STEM) && !name.startsWith(BITCOIN_KIT_MIGRATION_FILE_STEM)) {
+            require(reservedPrefixes.none(name::startsWith)) {
                 "Database file name uses a reserved migration prefix: $databaseName"
             }
             // Contains, not endsWith: the SQLite family of a staging file (-wal, -shm, ...) is recovered too.
             require(!name.contains(STAGING_SUFFIX) && !name.contains(BACKUP_SUFFIX)) {
                 "Database file name uses a reserved migration suffix: $databaseName"
             }
+            return databaseName
         }
 
         private const val DATABASE_KEY_SIZE = 32

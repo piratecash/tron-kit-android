@@ -1,6 +1,7 @@
 package io.horizontalsystems.tronkit
 
 import com.google.gson.Gson
+import io.horizontalsystems.databasenaming.DatabaseNameResolver
 import io.horizontalsystems.sqlcipher.room.DatabaseKeyMismatchException
 import io.horizontalsystems.sqlcipher.room.DatabaseMigrationConflictException
 import io.horizontalsystems.sqlcipher.room.DatabaseMigrationInProgressException
@@ -363,8 +364,13 @@ class TronKit(
          * Throws [DatabaseMigrationConflictException] while another migration or clear runs in the same
          * directory; retry later. Stop the kit first.
          */
-        fun clear(context: PlatformContext, network: Network, walletId: String) {
-            TronDatabaseManager.clear(context, network, walletId)
+        fun clear(
+            context: PlatformContext,
+            network: Network,
+            walletId: String,
+            nameResolver: DatabaseNameResolver = DatabaseNameResolver.Identity,
+        ) {
+            TronDatabaseManager.clear(context, network, walletId, nameResolver)
         }
 
         /**
@@ -378,8 +384,9 @@ class TronKit(
             context: PlatformContext,
             network: Network,
             walletId: String,
-            databaseKey: ByteArray
-        ): DatabaseMigrationResult = TronDatabaseManager.migrateMainDatabase(context, network, walletId, databaseKey)
+            databaseKey: ByteArray,
+            nameResolver: DatabaseNameResolver = DatabaseNameResolver.Identity,
+        ): DatabaseMigrationResult = TronDatabaseManager.migrateMainDatabase(context, network, walletId, databaseKey, nameResolver)
 
         fun getAddress(seed: ByteArray, network: Network): Address {
             val privateKey = Signer.privateKey(seed, network)
@@ -400,10 +407,11 @@ class TronKit(
             transactionSource: TransactionSource?,
             walletId: String,
             databaseKey: ByteArray,
-            eventListenerFactory: EventListener.Factory? = null
+            eventListenerFactory: EventListener.Factory? = null,
+            nameResolver: DatabaseNameResolver = DatabaseNameResolver.Identity,
         ): TronKit {
             val address = getAddress(seed, network)
-            return getInstance(application, address, network, rpcSource, transactionSource, walletId, databaseKey, eventListenerFactory)
+            return getInstance(application, address, network, rpcSource, transactionSource, walletId, databaseKey, eventListenerFactory, nameResolver)
         }
 
         /**
@@ -420,7 +428,8 @@ class TronKit(
             transactionSource: TransactionSource?,
             walletId: String,
             databaseKey: ByteArray,
-            eventListenerFactory: EventListener.Factory? = null
+            eventListenerFactory: EventListener.Factory? = null,
+            nameResolver: DatabaseNameResolver = DatabaseNameResolver.Identity,
         ): TronKit {
             val tronGridProvider = TronGridProvider(rpcSource.urls.first(), rpcSource.apiKeys, rpcSource.auth, eventListenerFactory)
 
@@ -434,7 +443,7 @@ class TronKit(
             }
 
             // Before ConnectionManager: opening the database can throw, and the manager registers a system callback.
-            val mainDatabase = TronDatabaseManager.getMainDatabase(application, network, walletId, databaseKey)
+            val mainDatabase = TronDatabaseManager.getMainDatabase(application, network, walletId, databaseKey, nameResolver)
             val syncTimer = SyncTimer(30, ConnectionManager(application))
             val storage = Storage(mainDatabase)
             val accountInfoManager = AccountInfoManager(storage)
@@ -494,7 +503,8 @@ class TronKit(
             tronGridApiKeys: List<String>,
             walletId: String,
             databaseKey: ByteArray,
-            eventListenerFactory: EventListener.Factory? = null
+            eventListenerFactory: EventListener.Factory? = null,
+            nameResolver: DatabaseNameResolver = DatabaseNameResolver.Identity,
         ): TronKit = getInstance(
             application,
             seed,
@@ -503,7 +513,8 @@ class TronKit(
             TransactionSource.tronGrid(network, tronGridApiKeys),
             walletId,
             databaseKey,
-            eventListenerFactory
+            eventListenerFactory,
+            nameResolver
         )
 
         /**
@@ -519,7 +530,8 @@ class TronKit(
             tronGridApiKeys: List<String>,
             walletId: String,
             databaseKey: ByteArray,
-            eventListenerFactory: EventListener.Factory? = null
+            eventListenerFactory: EventListener.Factory? = null,
+            nameResolver: DatabaseNameResolver = DatabaseNameResolver.Identity,
         ): TronKit = getInstance(
             application,
             address,
@@ -528,7 +540,8 @@ class TronKit(
             TransactionSource.tronGrid(network, tronGridApiKeys),
             walletId,
             databaseKey,
-            eventListenerFactory
+            eventListenerFactory,
+            nameResolver
         )
     }
 }

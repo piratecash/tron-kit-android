@@ -158,7 +158,7 @@ class EncryptedDatabaseAndroidTest {
     }
 
     private fun clearByPath(file: File) {
-        tronKitDatabases.clearDatabases(file.absoluteFile.parent!!, listOf(file.name), migrationId = file.path)
+        tronKitDatabases().clearDatabases(file.absoluteFile.parent!!, listOf(file.name), migrationId = file.path)
     }
 
     // A staging file as sqlcipher-room writes it: sqlcipher_export into an attached database keyed with x'<hex>'.
