@@ -134,6 +134,19 @@ class FeeProviderTest {
     }
 
     @Test
+    fun feesAccountActivation_chainParameters_matchesTransferToNeverActivatedAccount() = runTest {
+        every { chainParameterManager.createAccountFee } returns 100L
+        every { chainParameterManager.transactionFee } returns 1_000L
+        every { chainParameterManager.createNewAccountFeeInSystemContract } returns 1_000_000L
+
+        val reserve = feeProvider.feesAccountActivation()
+        val transferFees = withAccountResponse("{}") { it.estimateFee(transfer) }
+
+        assertEquals(1_100_000L, reserve.sumOf { it.feeInSuns })
+        assertEquals(transferFees, reserve)
+    }
+
+    @Test
     fun accountStatus_neverActivatedAccount_returnsNotActive() = runTest {
         val status = withAccountResponse("{}") { it.accountStatus(ownerAddress) }
 

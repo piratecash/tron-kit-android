@@ -53,7 +53,8 @@ class FeeProvider(
     suspend fun accountStatus(address: Address) =
         AccountStatus.from(address, nodeApiProvider.fetchAccount(address.hex))
 
-    private fun feesAccountActivation(): List<Fee> {
+    // Also the reserve for a transfer whose recipient is not known yet: the worst case for TRX/TRC10.
+    fun feesAccountActivation(): List<Fee> {
         return listOf(
             Fee.Bandwidth(points = chainParameterManager.createAccountFee, price = chainParameterManager.transactionFee),
             Fee.AccountActivation(amount = chainParameterManager.createNewAccountFeeInSystemContract)

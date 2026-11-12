@@ -185,6 +185,10 @@ class TronKit(
         return contract?.let { feeProvider.estimateFee(it) } ?: throw IllegalStateException("No contract!")
     }
 
+    fun accountActivationFees(): List<Fee> {
+        return feeProvider.feesAccountActivation()
+    }
+
     suspend fun isAccountActive(address: Address): Boolean {
         return feeProvider.isAccountActive(address)
     }
