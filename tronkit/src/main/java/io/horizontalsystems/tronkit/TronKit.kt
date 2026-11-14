@@ -15,6 +15,7 @@ import io.horizontalsystems.tronkit.database.Storage
 import io.horizontalsystems.tronkit.database.TronDatabaseManager
 import io.horizontalsystems.tronkit.decoration.DecorationManager
 import io.horizontalsystems.tronkit.decoration.trc20.Trc20TransactionDecorator
+import io.horizontalsystems.tronkit.models.AccountResources
 import io.horizontalsystems.tronkit.models.AccountStatus
 import io.horizontalsystems.tronkit.models.Address
 import io.horizontalsystems.tronkit.models.Contract
@@ -105,6 +106,18 @@ class TronKit(
 
     val transactionsFlow: StateFlow<Pair<List<FullTransaction>, Boolean>>
         get() = transactionManager.transactionsFlow
+
+    val accountResourcesFlow: StateFlow<AccountResources?>
+        get() = feeProvider.accountResourcesFlow
+
+    suspend fun refreshAccountResources() {
+        feeProvider.refreshAccountResources(address)
+    }
+
+    /** Stores the on-chain receipt of [hash] and re-emits the transaction; false while it is not in a block. */
+    suspend fun fetchTransactionReceipt(hash: String): Boolean {
+        return transactionManager.fetchReceipt(hash)
+    }
 
     fun watchTrc20(contractAddress: Address) {
         accountInfoManager.watchTrc20(contractAddress)
@@ -454,7 +467,7 @@ class TronKit(
             val decorationManager = DecorationManager(storage).apply {
                 addTransactionDecorator(Trc20TransactionDecorator(address))
             }
-            val transactionManager = TransactionManager(address, storage, decorationManager, Gson())
+            val transactionManager = TransactionManager(address, storage, decorationManager, Gson(), tronGridProvider)
             val chainParameterManager = ChainParameterManager(tronGridProvider, storage)
 
             val transactionSyncer = historyProvider?.let {

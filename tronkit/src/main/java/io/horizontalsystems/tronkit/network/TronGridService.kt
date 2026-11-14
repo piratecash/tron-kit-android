@@ -456,13 +456,13 @@ class RegularTransactionData(
     val ret: List<TransactionRet>,
     val withdraw_amount: Long?,
     val txID: String,
-    val net_usage: Long,
+    val net_usage: Long?,
     val raw_data_hex: String,
-    val net_fee: Long,
-    val energy_usage: Long,
+    val net_fee: Long?,
+    val energy_usage: Long?,
     val blockNumber: Long,
-    val energy_fee: Long,
-    val energy_usage_total: Long,
+    val energy_fee: Long?,
+    val energy_usage_total: Long?,
     val raw_data: RawData
 ) : TransactionData(block_timestamp)
 

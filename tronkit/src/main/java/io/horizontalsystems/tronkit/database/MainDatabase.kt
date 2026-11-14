@@ -37,7 +37,7 @@ import java.io.File
         ChainParameter::class,
         RawTransactionBroadcastRecord::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 @TypeConverters(RoomTypeConverters::class)
@@ -69,6 +69,20 @@ abstract class MainDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(connection: SQLiteConnection) {
+                connection.execSQL("ALTER TABLE `Transaction` ADD COLUMN `originEnergyUsage` INTEGER")
+                // A real receipt always consumes or burns bandwidth: all-zero rows are TronScan fill-ins.
+                connection.execSQL(
+                    """
+                    UPDATE `Transaction` SET netUsage = NULL, netFee = NULL, energyUsage = NULL,
+                        energyFee = NULL, energyUsageTotal = NULL
+                    WHERE netUsage = 0 AND netFee = 0
+                    """.trimIndent()
+                )
+            }
+        }
+
         /**
          * Opens the SQLCipher database [databaseName]: a name inside the platform database directory or
          * an absolute path. [databaseKey] must be exactly 32 bytes and the file name (basename) of
@@ -89,7 +103,7 @@ abstract class MainDatabase : RoomDatabase() {
             require(databaseKey.size == DATABASE_KEY_SIZE) { "Database key must contain exactly $DATABASE_KEY_SIZE bytes" }
             val resolvedName = resolvedDatabaseName(databaseName, nameResolver)
             return mainDatabaseBuilder(context, resolvedName, databaseKey, nameResolver)
-                .addMigrations(MIGRATION_4_5)
+                .addMigrations(MIGRATION_4_5, MIGRATION_5_6)
                 .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = false)
                 .build()
         }

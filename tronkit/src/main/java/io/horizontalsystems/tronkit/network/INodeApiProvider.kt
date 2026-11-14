@@ -1,5 +1,8 @@
 package io.horizontalsystems.tronkit.network
 
+import io.horizontalsystems.tronkit.models.AccountResources
+import io.horizontalsystems.tronkit.models.ContractInfo
+import io.horizontalsystems.tronkit.models.TransactionInfo
 import java.math.BigInteger
 
 interface INodeApiProvider {
@@ -30,6 +33,11 @@ interface INodeApiProvider {
         functionSelector: String,
         parameter: String
     ): Long
+    suspend fun getAccountResource(address: String): AccountResources
+    suspend fun getContract(contractAddress: String): ContractInfo
+
+    /** Null while the transaction is not in a block yet. */
+    suspend fun getTransactionInfoById(txId: String): TransactionInfo?
 }
 
 data class NodeAccountResponse(

@@ -27,7 +27,7 @@ class MainDatabaseVersion5CompatibilityTest {
         // Robolectric cannot load the native SQLCipher library, so the plaintext fixture is opened by a plain
         // Room builder with the kit's schema and migrations; the encrypted path is covered on desktop and device.
         val database = Room.databaseBuilder(context, MainDatabase::class.java, databaseName)
-            .addMigrations(MainDatabase.MIGRATION_4_5)
+            .addMigrations(MainDatabase.MIGRATION_4_5, MainDatabase.MIGRATION_5_6)
             .allowMainThreadQueries()
             .build()
         try {

@@ -21,8 +21,14 @@ class ChainParameterManager(
     val energyFee: Long // energy unit price
         get() = chainParameters["getEnergyFee"] ?: 420
 
+    val createAccountFeeInSuns: Long // TRX burned instead of bandwidth when a transfer creates an account
+        get() = chainParameters["getCreateAccountFee"] ?: 100_000
+
     val createAccountFee: Long // bandwidth points for creating account
-        get() = (chainParameters["getCreateAccountFee"] ?: 100_000) / transactionFee
+        get() = createAccountFeeInSuns / transactionFee
+
+    val createNewAccountBandwidthRate: Long // bandwidth multiplier of a transfer that creates an account
+        get() = chainParameters["getCreateNewAccountBandwidthRate"] ?: 1
 
     val createNewAccountFeeInSystemContract: Long // account activation fee in TRX/TRC10 transfer
         get() = chainParameters["getCreateNewAccountFeeInSystemContract"] ?: 1_000_000

@@ -2,6 +2,7 @@ package io.horizontalsystems.tronkit.transaction
 
 import com.google.protobuf.ByteString
 import io.horizontalsystems.tronkit.TronKit
+import io.horizontalsystems.tronkit.models.AccountResources
 import io.horizontalsystems.tronkit.models.AccountStatus
 import io.horizontalsystems.tronkit.models.Address
 import io.horizontalsystems.tronkit.models.Contract
@@ -10,6 +11,10 @@ import io.horizontalsystems.tronkit.models.TransferContract
 import io.horizontalsystems.tronkit.models.TriggerSmartContract
 import io.horizontalsystems.tronkit.network.INodeApiProvider
 import io.horizontalsystems.tronkit.sync.ChainParameterManager
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.tron.protos.Protocol.Transaction
 
 
@@ -18,19 +23,29 @@ sealed class Fee {
     val feeInSuns: Long
         get() = when (this) {
             is AccountActivation -> amount
-            is Bandwidth -> points * price
-            is Energy -> required * price
+            is Bandwidth -> if (source == Bandwidth.Source.Burn) burnInSuns else 0
+            is Energy -> (required - fromAccount - fromContract) * price
         }
 
     data class Bandwidth(
         val points: Long,
-        val price: Long //sun
-    ) : Fee()
+        val price: Long, //sun
+        val source: Source = Source.Burn,
+        val burnInSuns: Long = points * price
+    ) : Fee() {
+        enum class Source { Staked, Free, Burn }
+    }
 
     data class Energy(
         val required: Long,
-        val price: Long //sun
-    ) : Fee()
+        val price: Long, //sun
+        val fromAccount: Long = 0,
+        val fromContract: Long = 0
+    ) : Fee() {
+        // The fee_limit to sign: it must cover the whole call, whoever pays for the energy.
+        val feeLimitInSuns: Long
+            get() = required * price
+    }
 
     data class AccountActivation(
         val amount: Long //sun current 1TRX
@@ -38,14 +53,19 @@ sealed class Fee {
 
 }
 
-// curl -X POST  https://nile.trongrid.io/wallet/getaccountresource -d '{"address" : "TNeQ7jLVzXUB9kXVurzN9ZQibLaykov5v2" }'
-
 class FeeProvider(
     private val nodeApiProvider: INodeApiProvider,
     private val chainParameterManager: ChainParameterManager
 ) {
 
     private val MAX_RESULT_SIZE_IN_TX: Long = 64
+
+    private val _accountResourcesFlow = MutableStateFlow<AccountResources?>(null)
+    val accountResourcesFlow: StateFlow<AccountResources?> = _accountResourcesFlow.asStateFlow()
+
+    suspend fun refreshAccountResources(owner: Address) {
+        ownerResources(owner)
+    }
 
     suspend fun isAccountActive(address: Address) =
         nodeApiProvider.fetchAccount(address.hex) != null
@@ -112,40 +132,87 @@ class FeeProvider(
         return message.contains("does not support estimate energy", ignoreCase = true)
     }
 
-    suspend fun estimateFee(contract: Contract): List<Fee> {
-        val fees = mutableListOf<Fee>()
-        var feeLimit: Long = 0
+    suspend fun estimateFee(contract: Contract): List<Fee> = when (contract) {
+        is TransferContract -> transferFees(contract, contract.ownerAddress, contract.toAddress)
+        is TransferAssetContract -> transferFees(contract, contract.ownerAddress, contract.toAddress)
+        is TriggerSmartContract -> smartContractFees(contract)
+        else -> throw TronKit.TransactionError.NotSupportedContract(contract)
+    }
 
-        when (contract) {
-            is TransferContract -> {
-                if (!isAccountActive(contract.toAddress)) {
-                    return feesAccountActivation()
-                }
-            }
+    private suspend fun transferFees(contract: Contract, owner: Address, recipient: Address): List<Fee> {
+        val recipientActive = isAccountActive(recipient)
+        val resources = ownerResources(owner)
+        val points = estimateBandwidth(contract, feeLimit = 0)
 
-            is TransferAssetContract -> {
-                if (!isAccountActive(contract.toAddress)) {
-                    return feesAccountActivation()
-                }
-            }
+        if (recipientActive) return listOf(bandwidthFee(points, resources))
 
-            is TriggerSmartContract -> {
-                val energyRequired = estimateEnergy(contract)
-                val feeEnergy = Fee.Energy(required = energyRequired, price = chainParameterManager.energyFee)
-                fees.add(feeEnergy)
+        return listOf(
+            accountCreationBandwidthFee(points, resources),
+            Fee.AccountActivation(amount = chainParameterManager.createNewAccountFeeInSystemContract)
+        )
+    }
 
-                feeLimit = feeEnergy.feeInSuns
-            }
+    private suspend fun smartContractFees(contract: TriggerSmartContract): List<Fee> {
+        val required = estimateEnergy(contract)
+        val resources = ownerResources(contract.ownerAddress)
+        val fromContract = deployerEnergyShare(contract, required)
+        val energyFee = Fee.Energy(
+            required = required,
+            price = chainParameterManager.energyFee,
+            fromAccount = minOf(required - fromContract, resources.energy.available),
+            fromContract = fromContract
+        )
+        val points = estimateBandwidth(contract, energyFee.feeLimitInSuns)
 
-            else -> {
-                throw TronKit.TransactionError.NotSupportedContract(contract)
-            }
+        return listOf(energyFee, bandwidthFee(points, resources))
+    }
+
+    // Each quota must cover the whole transaction, otherwise all of it is burned.
+    private fun bandwidthFee(points: Long, resources: AccountResources): Fee.Bandwidth {
+        val source = when {
+            resources.stakedBandwidth.available >= points -> Fee.Bandwidth.Source.Staked
+            resources.freeBandwidth.available >= points -> Fee.Bandwidth.Source.Free
+            else -> Fee.Bandwidth.Source.Burn
         }
+        return Fee.Bandwidth(points = points, price = chainParameterManager.transactionFee, source = source)
+    }
 
-        val bandwidth = estimateBandwidth(contract, feeLimit)
-        fees.add(Fee.Bandwidth(points = bandwidth, chainParameterManager.transactionFee))
+    // java-tron BandwidthProcessor.consumeForCreateNewAccount: no free quota, a flat burn instead of points × price.
+    private fun accountCreationBandwidthFee(txPoints: Long, resources: AccountResources): Fee.Bandwidth {
+        val points = txPoints * chainParameterManager.createNewAccountBandwidthRate
+        val source = if (resources.stakedBandwidth.available >= points) Fee.Bandwidth.Source.Staked else Fee.Bandwidth.Source.Burn
+        return Fee.Bandwidth(
+            points = points,
+            price = chainParameterManager.transactionFee,
+            source = source,
+            burnInSuns = chainParameterManager.createAccountFeeInSuns
+        )
+    }
 
-        return fees
+    // Contract settings are mutable on-chain, so they are read on every estimate.
+    private suspend fun deployerEnergyShare(contract: TriggerSmartContract, required: Long): Long {
+        val info = orNull { nodeApiProvider.getContract(contract.contractAddress.hex) } ?: return 0
+        val deployer = info.originAddress ?: return 0
+        // A caller who deployed the contract pays from one pool (java-tron ReceiptCapsule).
+        if (deployer == contract.ownerAddress || info.consumeUserResourcePercent >= 100) return 0
+
+        val deployerAvailable = orNull { nodeApiProvider.getAccountResource(deployer.hex) }?.energy?.available ?: return 0
+        val subsidised = required * (100 - info.consumeUserResourcePercent) / 100
+        return minOf(subsidised, info.originEnergyLimit, deployerAvailable)
+    }
+
+    private suspend fun ownerResources(owner: Address): AccountResources =
+        orNull { nodeApiProvider.getAccountResource(owner.hex) }
+            ?.also { _accountResourcesFlow.value = it }
+            ?: AccountResources()
+
+    // Resource lookups only refine the estimate; a failure falls back to everything burned.
+    private suspend fun <T> orNull(block: suspend () -> T): T? = try {
+        block()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Throwable) {
+        null
     }
 
 }

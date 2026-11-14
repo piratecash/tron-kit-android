@@ -7,6 +7,10 @@ import com.google.gson.reflect.TypeToken
 import io.horizontalsystems.tronkit.TronKit.TransactionError
 import io.horizontalsystems.tronkit.hexStringToByteArray
 import io.horizontalsystems.tronkit.models.AccountInfo
+import io.horizontalsystems.tronkit.models.AccountResources
+import io.horizontalsystems.tronkit.models.Address
+import io.horizontalsystems.tronkit.models.ContractInfo
+import io.horizontalsystems.tronkit.models.TransactionInfo
 import io.horizontalsystems.tronkit.models.Trc20Balance
 import io.horizontalsystems.tronkit.rpc.BigIntegerTypeAdapter
 import io.horizontalsystems.tronkit.rpc.ByteArrayTypeAdapter
@@ -270,6 +274,41 @@ class TronGridProvider(
         return response.energy_used
     }
 
+    override suspend fun getAccountResource(address: String): AccountResources {
+        val response = extensionApi.getAccountResource(GetAccountRequest(address)).await()
+        return AccountResources(
+            freeBandwidth = AccountResources.Resource(response.longOrZero("freeNetLimit"), response.longOrZero("freeNetUsed")),
+            stakedBandwidth = AccountResources.Resource(response.longOrZero("NetLimit"), response.longOrZero("NetUsed")),
+            energy = AccountResources.Resource(response.longOrZero("EnergyLimit"), response.longOrZero("EnergyUsed")),
+        )
+    }
+
+    override suspend fun getContract(contractAddress: String): ContractInfo {
+        val response = extensionApi.getContract(GetTransactionByIdRequest(contractAddress)).await()
+        return ContractInfo(
+            consumeUserResourcePercent = response.longOrZero("consume_user_resource_percent"),
+            // java-tron ContractCapsule.getOriginEnergyLimit: an unset (0) limit means the creator default.
+            originEnergyLimit = response.longOrZero("origin_energy_limit").takeIf { it > 0 } ?: CREATOR_DEFAULT_ENERGY_LIMIT,
+            originAddress = response.get("origin_address")?.takeIf { !it.isJsonNull }?.asString?.let(Address::fromHex),
+        )
+    }
+
+    override suspend fun getTransactionInfoById(txId: String): TransactionInfo? {
+        val response = extensionApi.getTransactionInfoById(GetTransactionByIdRequest(txId)).await()
+        if (!response.has("blockNumber")) return null
+        val receipt = response.getAsJsonObject("receipt") ?: JsonObject()
+        return TransactionInfo(
+            fee = response.longOrZero("fee"),
+            blockNumber = response.longOrZero("blockNumber"),
+            netUsage = receipt.longOrZero("net_usage"),
+            netFee = receipt.longOrZero("net_fee"),
+            energyUsage = receipt.longOrZero("energy_usage"),
+            energyFee = receipt.longOrZero("energy_fee"),
+            originEnergyUsage = receipt.longOrZero("origin_energy_usage"),
+            energyUsageTotal = receipt.longOrZero("energy_usage_total"),
+        )
+    }
+
     // IHistoryProvider
 
     override suspend fun fetchAccountInfo(address: String): AccountInfo {
@@ -333,6 +372,10 @@ class TronGridProvider(
     }
 
     // Helpers
+
+    // Protobuf omits zero values from the response.
+    private fun JsonObject.longOrZero(key: String): Long =
+        get(key)?.takeIf { !it.isJsonNull }?.asLong ?: 0
 
     private fun hexStringToUtf8String(hexString: String?) = try {
         hexString?.let { String(it.hexStringToByteArray()) }
@@ -419,6 +462,18 @@ class TronGridProvider(
         @Headers("Content-Type: application/json", "Accept: application/json")
         fun getTransactionById(@Body request: GetTransactionByIdRequest): Single<JsonObject>
 
+        @POST("wallet/gettransactioninfobyid")
+        @Headers("Content-Type: application/json", "Accept: application/json")
+        fun getTransactionInfoById(@Body request: GetTransactionByIdRequest): Single<JsonObject>
+
+        @POST("wallet/getaccountresource")
+        @Headers("Content-Type: application/json", "Accept: application/json")
+        fun getAccountResource(@Body request: GetAccountRequest): Single<JsonObject>
+
+        @POST("wallet/getcontract")
+        @Headers("Content-Type: application/json", "Accept: application/json")
+        fun getContract(@Body request: GetTransactionByIdRequest): Single<JsonObject>
+
         @GET("wallet/getchainparameters")
         fun getChainParameters(): Single<ChainParametersResponse>
 
@@ -429,6 +484,7 @@ class TronGridProvider(
     companion object {
         private const val PAGE_LIMIT = 200
         private const val ORDER_BY = "block_timestamp,asc"
+        private const val CREATOR_DEFAULT_ENERGY_LIMIT = 10_000_000L
     }
 }
 
