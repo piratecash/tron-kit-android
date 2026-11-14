@@ -384,6 +384,16 @@ class FeeProviderTest {
     }
 
     @Test
+    fun refreshAccountResources_fetchFails_throwsSoCallerCanRetry() = runTest {
+        coEvery { apiProvider.getAccountResource(ownerAddress.hex) } throws IllegalStateException("offline")
+
+        val result = runCatching { feeProvider.refreshAccountResources(ownerAddress) }
+
+        assertTrue(result.exceptionOrNull() is IllegalStateException)
+        assertNull(feeProvider.accountResourcesFlow.value)
+    }
+
+    @Test
     fun accountStatus_neverActivatedAccount_returnsNotActive() = runTest {
         val status = withAccountResponse("{}") { it.accountStatus(ownerAddress) }
 

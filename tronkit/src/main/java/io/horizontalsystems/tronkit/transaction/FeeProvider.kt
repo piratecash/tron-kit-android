@@ -63,8 +63,9 @@ class FeeProvider(
     private val _accountResourcesFlow = MutableStateFlow<AccountResources?>(null)
     val accountResourcesFlow: StateFlow<AccountResources?> = _accountResourcesFlow.asStateFlow()
 
+    // Unlike the fee estimate, an explicit refresh reports the failure so the caller can retry.
     suspend fun refreshAccountResources(owner: Address) {
-        ownerResources(owner)
+        _accountResourcesFlow.value = nodeApiProvider.getAccountResource(owner.hex)
     }
 
     suspend fun isAccountActive(address: Address) =
