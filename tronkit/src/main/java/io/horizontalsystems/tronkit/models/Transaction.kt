@@ -20,6 +20,7 @@ data class Transaction(
     val energyUsage: Long? = null,
     val energyFee: Long? = null,
     val energyUsageTotal: Long? = null,
+    val originEnergyUsage: Long? = null,
 
     val contractsRaw: String? = null,
 

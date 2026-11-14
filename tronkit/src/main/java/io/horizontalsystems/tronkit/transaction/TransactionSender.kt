@@ -5,13 +5,14 @@ import io.horizontalsystems.tronkit.TronKit.TransactionError
 import io.horizontalsystems.tronkit.models.Contract
 import io.horizontalsystems.tronkit.models.TransferContract
 import io.horizontalsystems.tronkit.models.TriggerSmartContract
-import io.horizontalsystems.tronkit.network.BroadcastTransactionResponse
 import io.horizontalsystems.tronkit.network.CreatedTransaction
-import io.horizontalsystems.tronkit.network.TronGridService
+import io.horizontalsystems.tronkit.network.INodeApiProvider
+import io.horizontalsystems.tronkit.network.SignedTransaction
+import io.horizontalsystems.tronkit.network.signedTransaction
 import org.tron.protos.Protocol.Transaction
 
 class TransactionSender(
-    private val tronGridService: TronGridService
+    private val nodeApiProvider: INodeApiProvider
 ) {
     private fun isValidCreatedTransaction(createdTransaction: CreatedTransaction, contract: Contract): Boolean {
         val rawData = Transaction.raw.parseFrom(ByteString.fromHex(createdTransaction.raw_data_hex))
@@ -27,21 +28,21 @@ class TransactionSender(
     suspend fun createTransaction(contract: Contract, feeLimit: Long?): CreatedTransaction {
         val createdTransaction = when (contract) {
             is TransferContract -> {
-                tronGridService.createTransaction(
-                    fromAddress = contract.ownerAddress,
-                    toAddress = contract.toAddress,
+                nodeApiProvider.createTransaction(
+                    ownerAddress = contract.ownerAddress.hex,
+                    toAddress = contract.toAddress.hex,
                     amount = contract.amount
                 )
             }
 
             is TriggerSmartContract -> {
-                tronGridService.triggerSmartContract(
-                    ownerAddress = contract.ownerAddress,
-                    contractAddress = contract.contractAddress,
+                nodeApiProvider.triggerSmartContract(
+                    ownerAddress = contract.ownerAddress.hex,
+                    contractAddress = contract.contractAddress.hex,
                     functionSelector = contract.functionSelector ?: throw TransactionError.NoFunctionSelector(contract),
                     parameter = contract.parameter ?: throw TransactionError.NoParameter(contract),
-                    feeLimit = feeLimit ?: throw TransactionError.NoFeeLimit(contract),
                     callValue = contract.callValue?.toLong() ?: 0,
+                    feeLimit = feeLimit ?: throw TransactionError.NoFeeLimit(contract)
                 )
             }
 
@@ -57,9 +58,19 @@ class TransactionSender(
         }
     }
 
-    suspend fun broadcastTransaction(createdTransaction: CreatedTransaction, signer: Signer): BroadcastTransactionResponse {
-        val signature = signer.sign(createdTransaction)
-        return tronGridService.broadcastTransaction(createdTransaction, signature)
+    suspend fun getNowBlock() = nodeApiProvider.getNowBlock()
+
+    suspend fun broadcastTransaction(createdTransaction: CreatedTransaction, signer: Signer): String {
+        val signedTransaction = signTransaction(createdTransaction, signer)
+        nodeApiProvider.broadcastTransaction(signedTransaction)
+        return createdTransaction.txID.lowercase()
+    }
+
+    internal fun signedRawTransaction(createdTransaction: CreatedTransaction, signer: Signer) =
+        RawTransactionUtils.encode(signTransaction(createdTransaction, signer))
+
+    internal fun signTransaction(createdTransaction: CreatedTransaction, signer: Signer): SignedTransaction {
+        return createdTransaction.signedTransaction(signer.sign(createdTransaction))
     }
 
 }

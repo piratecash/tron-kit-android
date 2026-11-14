@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 rootProject.name = "tron-kit"
 include ':app'
 include ':tronkit'
+include ':tronkit-proto'

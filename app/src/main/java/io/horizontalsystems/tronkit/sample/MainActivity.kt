@@ -133,6 +133,17 @@ fun Balance(viewModel: MainViewModel) {
         }) {
             Text(text = "TEST BUTTON")
         }
+        Spacer(modifier = Modifier.height(10.dp))
+        Button(onClick = {
+            viewModel.estimateEnergyTest()
+        }) {
+            Text(text = "TEST estimateEnergy")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        SelectionContainer {
+            Text(text = viewModel.estimateEnergyTestResult, fontSize = 18.sp)
+        }
     }
 }
 

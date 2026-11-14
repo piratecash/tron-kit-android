@@ -1,10 +1,10 @@
 package io.horizontalsystems.tronkit.transaction
 
-import android.util.Log
 import com.google.gson.Gson
 import io.horizontalsystems.tronkit.database.Storage
 import io.horizontalsystems.tronkit.decoration.DecorationManager
 import io.horizontalsystems.tronkit.hexStringToByteArray
+import io.horizontalsystems.tronkit.logWarning
 import io.horizontalsystems.tronkit.models.Address
 import io.horizontalsystems.tronkit.models.FullTransaction
 import io.horizontalsystems.tronkit.models.InternalTransaction
@@ -14,6 +14,7 @@ import io.horizontalsystems.tronkit.models.Trc20EventRecord
 import io.horizontalsystems.tronkit.network.ContractRaw
 import io.horizontalsystems.tronkit.network.ContractTransactionData
 import io.horizontalsystems.tronkit.network.CreatedTransaction
+import io.horizontalsystems.tronkit.network.INodeApiProvider
 import io.horizontalsystems.tronkit.network.InternalTransactionData
 import io.horizontalsystems.tronkit.network.RegularTransactionData
 import io.horizontalsystems.tronkit.network.TransactionData
@@ -28,7 +29,8 @@ class TransactionManager(
     private val userAddress: Address,
     private val storage: Storage,
     private val decorationManager: DecorationManager,
-    private val gson: Gson
+    private val gson: Gson,
+    private val nodeApiProvider: INodeApiProvider
 ) {
     private val _transactionsFlow = MutableStateFlow<Pair<List<FullTransaction>, Boolean>>(Pair(listOf(), false))
     val transactionsFlow: StateFlow<Pair<List<FullTransaction>, Boolean>> = _transactionsFlow
@@ -89,6 +91,11 @@ class TransactionManager(
 
         if (transactions.isEmpty()) return
 
+        emit(transactions, initial)
+        storage.markTransactionsAsProcessed()
+    }
+
+    private fun emit(transactions: List<Transaction>, initial: Boolean) {
         val fullTransactions = decorationManager.decorateTransactions(transactions)
 
         val transactionWithTags = mutableListOf<TransactionWithTags>()
@@ -104,8 +111,6 @@ class TransactionManager(
 
         _transactionsFlow.tryEmit(Pair(fullTransactions, initial))
         _transactionsWithTagsFlow.tryEmit(transactionWithTags)
-
-        storage.markTransactionsAsProcessed()
     }
 
     fun saveTransactionData(transactionData: List<TransactionData>, confirmed: Boolean) {
@@ -164,12 +169,47 @@ class TransactionManager(
                     }
                 }
             } catch (error: Throwable) {
-                Log.w("e", "TransactionData parsing error", error)
+                logWarning("TransactionData parsing error", error)
             }
         }
 
         storage.saveInternalTransactions(internalTransactions)
-        storage.saveTransactions(transactions)
+        storage.saveTransactions(withStoredReceipts(transactions))
+    }
+
+    // History sources may omit receipt fields that were stored from the node; keep them.
+    private fun withStoredReceipts(transactions: List<Transaction>): List<Transaction> {
+        val stored = storage.getTransactions(transactions.map { it.hash }).associateBy { it.hashString }
+        return transactions.map { transaction ->
+            val existing = stored[transaction.hashString] ?: return@map transaction
+            transaction.copy(
+                netUsage = transaction.netUsage ?: existing.netUsage,
+                netFee = transaction.netFee ?: existing.netFee,
+                energyUsage = transaction.energyUsage ?: existing.energyUsage,
+                energyFee = transaction.energyFee ?: existing.energyFee,
+                originEnergyUsage = transaction.originEnergyUsage ?: existing.originEnergyUsage,
+                energyUsageTotal = transaction.energyUsageTotal ?: existing.energyUsageTotal,
+            )
+        }
+    }
+
+    suspend fun fetchReceipt(hash: String): Boolean {
+        val transaction = storage.getTransactions(listOf(hash.hexStringToByteArray())).firstOrNull() ?: return false
+        val info = nodeApiProvider.getTransactionInfoById(hash) ?: return false
+
+        val updated = transaction.copy(
+            fee = info.fee,
+            netUsage = info.netUsage,
+            netFee = info.netFee,
+            energyUsage = info.energyUsage,
+            energyFee = info.energyFee,
+            originEnergyUsage = info.originEnergyUsage,
+            energyUsageTotal = info.energyUsageTotal,
+        )
+        storage.saveTransactions(listOf(updated))
+        // Emitted directly: a concurrent process() marks every row processed, which would swallow a flag-based re-emit.
+        emit(listOf(updated), initial = false)
+        return true
     }
 
     private fun contractsWithWithdrawAmount(txData: RegularTransactionData): List<ContractRaw> {
@@ -219,7 +259,7 @@ class TransactionManager(
                     )
                 )
             } catch (error: Throwable) {
-                Log.w("e", "Contract TransactionData parsing error: ${it.transaction_id}", error)
+                logWarning("Contract TransactionData parsing error: ${it.transaction_id}", error)
             }
         }
 

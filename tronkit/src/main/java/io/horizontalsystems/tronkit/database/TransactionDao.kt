@@ -5,7 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.RawQuery
-import androidx.sqlite.db.SupportSQLiteQuery
+import androidx.room.RoomRawQuery
 import io.horizontalsystems.tronkit.models.InternalTransaction
 import io.horizontalsystems.tronkit.models.Transaction
 import io.horizontalsystems.tronkit.models.TransactionSyncState
@@ -27,7 +27,7 @@ interface TransactionDao {
     fun getTransactions(hashes: List<ByteArray>): List<Transaction>
 
     @RawQuery
-    suspend fun getTransactionsByRawQuery(query: SupportSQLiteQuery): List<Transaction>
+    suspend fun getTransactionsByRawQuery(query: RoomRawQuery): List<Transaction>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     fun insertTransactions(transactions: List<Transaction>)

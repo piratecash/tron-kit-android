@@ -1,2 +1,6 @@
 jdk:
-  - openjdk17
+  - openjdk21
+install:
+  - printf 'words=""\ntrongrid_api_key=""\n' > local.properties
+  - ./gradlew test
+  - ./gradlew publishToMavenLocal

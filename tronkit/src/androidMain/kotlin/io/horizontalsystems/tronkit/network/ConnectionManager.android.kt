@@ -6,16 +6,16 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 
-class ConnectionManager(context: Context) {
+actual class ConnectionManager actual constructor(context: Context) {
 
-    interface Listener {
-        fun onConnectionChange()
+    actual interface Listener {
+        actual fun onConnectionChange()
     }
 
     private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
-    var listener: Listener? = null
-    var isConnected = getInitialConnectionStatus()
+    actual var listener: Listener? = null
+    actual var isConnected = getInitialConnectionStatus()
     private var hasValidInternet = false
     private var hasConnection = false
     private var callback = ConnectionStatusCallback()
@@ -72,7 +72,7 @@ class ConnectionManager(context: Context) {
         }
     }
 
-    fun stop() {
+    actual fun stop() {
         try {
             connectivityManager.unregisterNetworkCallback(callback)
         } catch (e: Exception) {
