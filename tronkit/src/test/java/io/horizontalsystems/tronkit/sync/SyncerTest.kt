@@ -1,8 +1,8 @@
 package io.horizontalsystems.tronkit.sync
 
+import io.horizontalsystems.tronkit.TronKit
 import io.horizontalsystems.tronkit.TronKit.SyncState
 import io.horizontalsystems.tronkit.account.AccountInfoManager
-import io.horizontalsystems.tronkit.crypto.InternalBouncyCastleProvider
 import io.horizontalsystems.tronkit.database.Storage
 import io.horizontalsystems.tronkit.models.AccountInfo
 import io.horizontalsystems.tronkit.models.Address
@@ -31,7 +31,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.math.BigInteger
-import java.security.Security
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SyncerTest {
@@ -235,8 +234,8 @@ class SyncerTest {
 
     @Test
     fun sync_rpcPathZeroBalanceAccount_handlesZeroAndSyncsTrc20() = testScope.runTest {
-        // TronKit.init does this in production; Syncer swallows the balanceOf failure without it.
-        Security.addProvider(InternalBouncyCastleProvider.getInstance())
+        // Another test may leave a foreign "BC" provider without Keccak; init replaces it as in production.
+        TronKit.init()
         val realAddress = Address.fromHex("41ce7ba9c4618bc93f00c6673f73042fc0a33f1b62")
         val tokenAddress = Address.fromHex("410a38028ed6146aa29c687c052b233131468b6635")
         val tokenBalance = BigInteger.valueOf(42)
